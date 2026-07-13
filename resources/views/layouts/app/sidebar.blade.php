@@ -33,6 +33,10 @@
                 {{ __('Игроки') }}
             </flux:sidebar.item>
 
+            <flux:sidebar.item icon="arrow-up-tray" :href="route('admin.import')" :current="request()->routeIs('admin.import')" wire:navigate>
+                {{ __('Обмен данными') }}
+            </flux:sidebar.item>
+
 
 
             <flux:spacer />

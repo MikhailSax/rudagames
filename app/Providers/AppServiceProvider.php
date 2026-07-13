@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Services\Messenger\LoggingMessengerSender;
+use App\Services\Messenger\MessengerSenderInterface;
+use App\Services\Sms\LoggingSmsSender;
+use App\Services\Sms\SmsSenderInterface;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +19,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Заглушки-логгеры до подключения реальных провайдеров SMS/мессенджера.
+        $this->app->bind(SmsSenderInterface::class, LoggingSmsSender::class);
+        $this->app->bind(MessengerSenderInterface::class, LoggingMessengerSender::class);
     }
 
     /**

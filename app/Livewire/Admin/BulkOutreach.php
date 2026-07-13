@@ -5,6 +5,7 @@ namespace App\Livewire\Admin;
 use App\Models\Communication;
 use App\Models\Product;
 use App\Models\Team;
+use App\Services\Messenger\MessengerSenderInterface;
 use App\Services\Sms\SmsSenderInterface;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Attributes\Computed;
@@ -52,11 +53,11 @@ class BulkOutreach extends Component
             ->when($this->favoriteProductFilter, fn($q) => $q->where('favorite_product_id', $this->favoriteProductFilter));
     }
 
-    public function send(SmsSenderInterface $sms): void
+    public function send(SmsSenderInterface $sms, MessengerSenderInterface $messenger): void
     {
         $this->validate([
             'messageText' => 'required|string|min:3',
-            'channel' => 'required|in:sms,email',
+            'channel' => 'required|in:sms,email,messenger',
         ]);
 
         $teams = $this->baseQuery()->get();
@@ -70,11 +71,18 @@ class BulkOutreach extends Component
                 continue;
             }
 
+            if ($this->channel === 'messenger' && !$team->phone) {
+                $skippedCount++;
+                continue;
+            }
+
             $personalizedText = str_replace('{name}', $team->current_name, $this->messageText);
 
-            $delivered = $this->channel === 'sms'
-                ? $sms->send($team->phone, $personalizedText)
-                : $this->sendEmail($team->email, $personalizedText);
+            $delivered = match ($this->channel) {
+                'sms' => $sms->send($team->phone, $personalizedText),
+                'messenger' => $messenger->send($team->phone, $personalizedText),
+                default => $this->sendEmail($team->email, $personalizedText),
+            };
 
             Communication::create([
                 'team_id' => $team->id,

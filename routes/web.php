@@ -42,4 +42,10 @@ Route::get('/admin/players', PlayersCrud::class)
     ->middleware(['auth'])
     ->name('admin.players');
 
+use App\Livewire\Admin\DataImport;
+
+Route::get('/admin/import', DataImport::class)
+    ->middleware(['auth'])
+    ->name('admin.import');
+
 require __DIR__.'/settings.php';

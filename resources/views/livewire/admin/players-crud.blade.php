@@ -18,6 +18,7 @@
             <flux:table.column>Имя</flux:table.column>
             <flux:table.column>Телефон</flux:table.column>
             <flux:table.column>Команд</flux:table.column>
+            <flux:table.column>Последняя игра</flux:table.column>
             <flux:table.column></flux:table.column>
         </flux:table.columns>
 
@@ -25,8 +26,28 @@
             @forelse ($this->players as $player)
                 <flux:table.row wire:key="player-{{ $player->id }}">
                     <flux:table.cell>{{ $player->name ?? '—' }}</flux:table.cell>
-                    <flux:table.cell>{{ $player->phone ?? '—' }}</flux:table.cell>
+                    <flux:table.cell>
+                        @if ($player->phone)
+                            <div class="flex items-center gap-2" x-data="{ copied: false }">
+                                <span>{{ $player->phone }}</span>
+                                <button
+                                    type="button"
+                                    title="Скопировать номер"
+                                    x-on:click="navigator.clipboard.writeText('{{ $player->phone }}'); copied = true; setTimeout(() => copied = false, 1500)"
+                                    class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                                >
+                                    <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
+                                    <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
+                                </button>
+                            </div>
+                        @else
+                            —
+                        @endif
+                    </flux:table.cell>
                     <flux:table.cell>{{ $player->teams_count }}</flux:table.cell>
+                    <flux:table.cell>
+                        {{ $player->last_game_at ? $player->last_game_at->format('d.m.Y') : '—' }}
+                    </flux:table.cell>
                     <flux:table.cell>
                         <div class="flex gap-2 justify-end">
                             <flux:button size="sm" variant="ghost" wire:click="edit({{ $player->id }})">
@@ -45,7 +66,7 @@
                 </flux:table.row>
             @empty
                 <flux:table.row>
-                    <flux:table.cell colspan="4">
+                    <flux:table.cell colspan="5">
                         <flux:text variant="subtle">Игроки не найдены.</flux:text>
                     </flux:table.cell>
                 </flux:table.row>

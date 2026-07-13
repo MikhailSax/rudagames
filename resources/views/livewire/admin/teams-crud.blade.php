@@ -34,6 +34,7 @@
             <flux:table.column>Команда</flux:table.column>
             <flux:table.column>Телефон</flux:table.column>
             <flux:table.column>Игр</flux:table.column>
+            <flux:table.column>Последняя игра</flux:table.column>
             <flux:table.column>Стадия</flux:table.column>
             <flux:table.column>Активность</flux:table.column>
             <flux:table.column>Выручка</flux:table.column>
@@ -49,8 +50,24 @@
                             <flux:text size="sm" variant="subtle">{{ $team->captain_name }}</flux:text>
                         @endif
                     </flux:table.cell>
-                    <flux:table.cell>{{ $team->phone }}</flux:table.cell>
+                    <flux:table.cell>
+                        <div class="flex items-center gap-2" x-data="{ copied: false }">
+                            <span>{{ $team->phone }}</span>
+                            <button
+                                type="button"
+                                title="Скопировать номер"
+                                x-on:click="navigator.clipboard.writeText('{{ $team->phone }}'); copied = true; setTimeout(() => copied = false, 1500)"
+                                class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                            >
+                                <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
+                                <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
+                            </button>
+                        </div>
+                    </flux:table.cell>
                     <flux:table.cell>{{ $team->games_count }}</flux:table.cell>
+                    <flux:table.cell>
+                        {{ $team->last_game_at ? $team->last_game_at->format('d.m.Y') : '—' }}
+                    </flux:table.cell>
                     <flux:table.cell>
                         <flux:badge color="{{ $this->lifecycleColor($team->lifecycle_stage) }}" size="sm">
                             {{ $team->lifecycle_stage ?? 'не рассчитано' }}
@@ -80,7 +97,7 @@
                 </flux:table.row>
             @empty
                 <flux:table.row>
-                    <flux:table.cell colspan="7">
+                    <flux:table.cell colspan="8">
                         <flux:text variant="subtle">Команды не найдены.</flux:text>
                     </flux:table.cell>
                 </flux:table.row>

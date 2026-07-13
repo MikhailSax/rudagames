@@ -3,13 +3,16 @@
 namespace App\Services\Marketing;
 
 use App\Models\Communication;
+use App\Services\Messenger\MessengerSenderInterface;
 use App\Services\Sms\SmsSenderInterface;
 use Illuminate\Support\Facades\Mail;
 
 class SendCommunicationService
 {
-    public function __construct(private readonly SmsSenderInterface $sms)
-    {
+    public function __construct(
+        private readonly SmsSenderInterface $sms,
+        private readonly MessengerSenderInterface $messenger,
+    ) {
     }
 
     /**
@@ -18,7 +21,7 @@ class SendCommunicationService
      * и (опционально) отредактировал текст.
      *
      * @param Communication $communication Черновик со статусом "черновик"
-     * @param string $channel "sms" или "email"
+     * @param string $channel "sms", "email" или "messenger"
      * @param string $finalMessageText Финальный текст (после правок руководителя)
      */
     public function send(Communication $communication, string $channel, string $finalMessageText): bool
@@ -26,6 +29,7 @@ class SendCommunicationService
         $team = $communication->team;
         $sent = match ($channel) {
             'sms' => $this->sms->send($team->phone, $finalMessageText),
+            'messenger' => $this->messenger->send($team->phone, $finalMessageText),
             'email' => $this->sendEmail($team->email, $finalMessageText),
             default => throw new \InvalidArgumentException("Неизвестный канал: {$channel}"),
         };

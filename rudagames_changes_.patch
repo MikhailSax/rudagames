@@ -1,0 +1,2051 @@
+diff --git a/app/Console/Commands/GenerateWeeklyReport.php b/app/Console/Commands/GenerateWeeklyReport.php
+new file mode 100644
+index 0000000..f7e27f9
+--- /dev/null
++++ b/app/Console/Commands/GenerateWeeklyReport.php
+@@ -0,0 +1,44 @@
++<?php
++
++namespace App\Console\Commands;
++
++use App\Services\Reports\WeeklyReportService;
++use Illuminate\Console\Command;
++
++class GenerateWeeklyReport extends Command
++{
++    protected $signature = 'reports:generate-weekly {--week= : ISO-дата любого дня нужной недели (по умолчанию — прошлая неделя)}';
++
++    protected $description = 'Модуль 8: формирует еженедельный отчёт (продажи, клиенты, маркетинг) без AI-выводов';
++
++    public function handle(WeeklyReportService $service): int
++    {
++        $weekOption = $this->option('week');
++
++        $report = $weekOption
++            ? $service->generateFor(
++                \Illuminate\Support\Carbon::parse($weekOption)->startOfWeek(),
++                \Illuminate\Support\Carbon::parse($weekOption)->endOfWeek(),
++            )
++            : $service->generateForPreviousWeek();
++
++        $this->info("Отчёт сформирован: {$report->period_start->format('d.m.Y')} — {$report->period_end->format('d.m.Y')}");
++        $this->table(
++            ['revenue', 'profit', 'avg_check', 'avg_team_size', 'new', 'returning', 'lost', 'reactivated', 'sms_sent', 'sms_conversion'],
++            [[
++                $report->revenue,
++                $report->profit,
++                $report->avg_check,
++                $report->avg_team_size,
++                $report->new_teams_count,
++                $report->returning_teams_count,
++                $report->lost_teams_count,
++                $report->reactivated_teams_count,
++                $report->sms_sent_count,
++                $report->sms_conversion_count,
++            ]]
++        );
++
++        return self::SUCCESS;
++    }
++}
+diff --git a/app/Console/Commands/ImportTeamsGames.php b/app/Console/Commands/ImportTeamsGames.php
+index a912a25..dd4ad89 100644
+--- a/app/Console/Commands/ImportTeamsGames.php
++++ b/app/Console/Commands/ImportTeamsGames.php
+@@ -2,15 +2,8 @@
+ 
+ namespace App\Console\Commands;
+ 
+-use App\Models\Game;
+-use App\Models\GameCategory;
+-use App\Models\GameParticipation;
+-use App\Models\Product;
+-use App\Models\Team;
+-use App\Models\TeamNameHistory;
++use App\Services\Import\TeamsGamesImportService;
+ use Illuminate\Console\Command;
+-use Illuminate\Support\Facades\DB;
+-use Maatwebsite\Excel\Facades\Excel;
+ 
+ class ImportTeamsGames extends Command
+ {
+@@ -18,9 +11,7 @@ class ImportTeamsGames extends Command
+ 
+     protected $description = 'Импорт команд, игр и участий из xlsx-выгрузки rudagames.com';
+ 
+-    private const FALLBACK_CATEGORY = 'Без категории';
+-
+-    public function handle(): int
++    public function handle(TeamsGamesImportService $importer): int
+     {
+         $path = $this->argument('file');
+ 
+@@ -29,143 +20,16 @@ public function handle(): int
+             return self::FAILURE;
+         }
+ 
+-        $rows = Excel::toArray([], $path)[0];
+-        $header = array_map('trim', array_shift($rows));
+-
+-        $stats = [
+-            'processed' => 0,
+-            'skipped' => 0,
+-            'teams_created' => 0,
+-            'teams_renamed' => 0,
+-            'games_created' => 0,
+-        ];
+-        $skippedRows = [];
+-
+-        foreach ($rows as $i => $row) {
+-            $rowNum = $i + 2; // +2: заголовок + 1-индексация Excel
+-            $data = array_combine($header, $row);
+-
+-            $phone = $this->normalizePhone($data['Телефон'] ?? '');
+-
+-            if (strlen($phone) !== 11) {
+-                $skippedRows[] = [
+-                    'row' => $rowNum,
+-                    'team' => $data['Команда'] ?? '',
+-                    'phone' => $data['Телефон'] ?? '',
+-                    'reason' => 'Некорректный телефон после нормализации: '.$phone,
+-                ];
+-                $stats['skipped']++;
+-                continue;
+-            }
+-
+-            try {
+-                DB::transaction(function () use ($data, $phone, &$stats) {
+-                    $product = Product::firstOrCreate(['name' => trim($data['Продукт'])]);
+-
+-                    $categoryName = trim($data['Категория'] ?? '') ?: self::FALLBACK_CATEGORY;
+-                    $category = GameCategory::firstOrCreate([
+-                        'product_id' => $product->id,
+-                        'name' => $categoryName,
+-                    ]);
+-
+-                    $playedAt = $this->parseDate($data['Дата игры']);
+-
+-                    $game = Game::firstOrCreate(
+-                        [
+-                            'product_id' => $product->id,
+-                            'category_id' => $category->id,
+-                            'name' => trim($data['Пакет']),
+-                            'played_at' => $playedAt,
+-                        ]
+-                    );
+-                    if ($game->wasRecentlyCreated) {
+-                        $stats['games_created']++;
+-                    }
+-
+-                    $teamName = trim($data['Команда']);
+-                    $team = Team::firstOrNew(['phone' => $phone]);
+-                    $isNewTeam = ! $team->exists;
+-
+-                    if ($isNewTeam) {
+-                        $team->current_name = $teamName;
+-                        $team->captain_name = trim($data['Имя капитана'] ?? '') ?: null;
+-                        $team->email = trim($data['Почта'] ?? '') ?: null;
+-                        $team->save();
+-                        $stats['teams_created']++;
+-
+-                        TeamNameHistory::create([
+-                            'team_id' => $team->id,
+-                            'name' => $teamName,
+-                            'used_at' => $playedAt,
+-                        ]);
+-                    } elseif ($team->current_name !== $teamName) {
+-                        // команда играла раньше под другим именем — фиксируем историю
+-                        TeamNameHistory::firstOrCreate([
+-                            'team_id' => $team->id,
+-                            'name' => $teamName,
+-                            'used_at' => $playedAt,
+-                        ]);
+-
+-                        if ($playedAt >= ($team->last_game_at ?? $playedAt)) {
+-                            $team->current_name = $teamName;
+-                            $team->save();
+-                        }
+-                        $stats['teams_renamed']++;
+-                    }
+-
+-                    GameParticipation::firstOrCreate(
+-                        [
+-                            'game_id' => $game->id,
+-                            'team_id' => $team->id,
+-                        ],
+-                        [
+-                            'team_name_at_time' => $teamName,
+-                            'players_count' => (int) $data['Игроков сыграло'],
+-                            'revenue' => (float) $data['Выручка за команду'],
+-                        ]
+-                    );
+-                });
+-
+-                $stats['processed']++;
+-            } catch (\Throwable $e) {
+-                $skippedRows[] = [
+-                    'row' => $rowNum,
+-                    'team' => $data['Команда'] ?? '',
+-                    'phone' => $data['Телефон'] ?? '',
+-                    'reason' => 'Ошибка: '.$e->getMessage(),
+-                ];
+-                $stats['skipped']++;
+-            }
+-        }
++        $result = $importer->importFromFile($path);
+ 
+         $this->info('Импорт завершён.');
+-        $this->table(array_keys($stats), [array_values($stats)]);
++        $this->table(array_keys($result['stats']), [array_values($result['stats'])]);
+ 
+-        if (! empty($skippedRows)) {
++        if (! empty($result['skipped'])) {
+             $this->warn('Пропущенные строки:');
+-            $this->table(['row', 'team', 'phone', 'reason'], $skippedRows);
++            $this->table(['row', 'team', 'phone', 'reason'], $result['skipped']);
+         }
+ 
+         return self::SUCCESS;
+     }
+-
+-    private function normalizePhone(string $phone): string
+-    {
+-        return preg_replace('/\D/', '', $phone);
+-    }
+-
+-    private function parseDate($value): string
+-    {
+-        if ($value instanceof \DateTimeInterface) {
+-            return $value->format('Y-m-d H:i:s');
+-        }
+-
+-        // Excel иногда отдаёт дату как serial number
+-        if (is_numeric($value)) {
+-            return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($value)
+-                ->format('Y-m-d H:i:s');
+-        }
+-
+-        return date('Y-m-d H:i:s', strtotime((string) $value));
+-    }
+ }
+diff --git a/app/Console/Commands/RecalculatePlayerStats.php b/app/Console/Commands/RecalculatePlayerStats.php
+new file mode 100644
+index 0000000..f46aeb7
+--- /dev/null
++++ b/app/Console/Commands/RecalculatePlayerStats.php
+@@ -0,0 +1,36 @@
++<?php
++
++namespace App\Console\Commands;
++
++use App\Models\Player;
++use Illuminate\Console\Command;
++use Illuminate\Support\Facades\DB;
++
++class RecalculatePlayerStats extends Command
++{
++    protected $signature = 'players:recalculate-stats';
++
++    protected $description = 'Модуль 4: пересчитывает games_count для всех игроков на основе участий их команд';
++
++    public function handle(): int
++    {
++        $processed = 0;
++
++        Player::query()->chunkById(200, function ($players) use (&$processed) {
++            foreach ($players as $player) {
++                $gamesCount = DB::table('game_participations')
++                    ->join('team_player', 'team_player.team_id', '=', 'game_participations.team_id')
++                    ->where('team_player.player_id', $player->id)
++                    ->distinct('game_participations.game_id')
++                    ->count('game_participations.game_id');
++
++                $player->update(['games_count' => $gamesCount]);
++                $processed++;
++            }
++        });
++
++        $this->info("Пересчитано игроков: {$processed}");
++
++        return self::SUCCESS;
++    }
++}
+diff --git a/app/Livewire/Admin/AnalyticsDashboard.php b/app/Livewire/Admin/AnalyticsDashboard.php
+index 16f70c2..7547e02 100644
+--- a/app/Livewire/Admin/AnalyticsDashboard.php
++++ b/app/Livewire/Admin/AnalyticsDashboard.php
+@@ -4,6 +4,7 @@
+ 
+ use App\Models\Communication;
+ use App\Models\GameParticipation;
++use App\Models\MonthlyGoal;
+ use App\Models\Team;
+ use Carbon\CarbonInterface;
+ use Livewire\Attributes\Computed;
+@@ -13,6 +14,8 @@
+ #[Layout('layouts.app')]
+ class AnalyticsDashboard extends Component
+ {
++    public string $goalInput = '';
++
+     private function periodStart(): ?CarbonInterface
+     {
+         return now()->subDays(30);
+@@ -46,6 +49,105 @@ public function kpis(): array
+         ];
+     }
+ 
++    /**
++     * Модуль 9: показатели «сегодня» и «на этой неделе» — то, что руководитель видит
++     * при открытии CRM с утра.
++     */
++    #[Computed]
++    public function todayKpis(): array
++    {
++        $today = now();
++        $weekStart = now()->startOfWeek();
++        $weekEnd = now()->endOfWeek();
++
++        $newRegistrationsToday = GameParticipation::whereDate('created_at', $today)->count();
++
++        $teamsThisWeek = GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->whereBetween('games.played_at', [$weekStart, $weekEnd])
++            ->distinct('game_participations.team_id')
++            ->count('game_participations.team_id');
++
++        // Ожидаемая выручка: стоимость участия × число уже зарегистрированных команд
++        // по предстоящим играм на этой неделе.
++        $expectedRevenue = GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->whereBetween('games.played_at', [now(), $weekEnd])
++            ->selectRaw('COALESCE(SUM(games.cost), 0) as total')
++            ->value('total');
++
++        $smsToday = Communication::query()
++            ->where('channel', 'sms')
++            ->where('status', Communication::STATUS_SENT)
++            ->whereDate('sent_at', $today)
++            ->count();
++
++        return [
++            'new_registrations_today' => $newRegistrationsToday,
++            'teams_this_week' => $teamsThisWeek,
++            'expected_revenue' => (float) $expectedRevenue,
++            'need_to_return' => Communication::drafts()->where('goal', 'вернуть')->count(),
++            'sms_today' => $smsToday,
++        ];
++    }
++
++    /**
++     * Модуль 9: «Главные события» — опирается на черновики Marketing Engine (Модуль 6):
++     * каждая цель черновика уже отражает конкретное событие в жизни команды.
++     */
++    #[Computed]
++    public function mainEvents(): array
++    {
++        return [
++            'new_teams' => Team::where('first_game_at', '>=', now()->subDays(7))->count(),
++            'milestones_reached' => Communication::drafts()->where('goal', 'поздравить')->count(),
++            'need_contact' => Communication::drafts()->count(),
++            'need_second_game' => Communication::drafts()->where('goal', 'довести до второй игры')->count(),
++        ];
++    }
++
++    #[Computed]
++    public function currentMonthGoal(): ?MonthlyGoal
++    {
++        return MonthlyGoal::whereDate('month', now()->startOfMonth()->toDateString())->first();
++    }
++
++    #[Computed]
++    public function currentMonthRevenue(): float
++    {
++        return (float) GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->whereBetween('games.played_at', [now()->startOfMonth(), now()->endOfMonth()])
++            ->sum('game_participations.revenue');
++    }
++
++    #[Computed]
++    public function monthGoalProgressPercent(): ?float
++    {
++        $goal = $this->currentMonthGoal;
++
++        if (! $goal || (float) $goal->target_revenue <= 0) {
++            return null;
++        }
++
++        return round(min(100, $this->currentMonthRevenue / (float) $goal->target_revenue * 100), 1);
++    }
++
++    public function saveGoal(): void
++    {
++        $this->validate([
++            'goalInput' => 'required|numeric|min:1',
++        ]);
++
++        MonthlyGoal::updateOrCreate(
++            ['month' => now()->startOfMonth()->toDateString()],
++            ['target_revenue' => $this->goalInput]
++        );
++
++        $this->goalInput = '';
++        unset($this->currentMonthGoal, $this->monthGoalProgressPercent);
++    }
++
+     #[Computed]
+     public function lifecycleBreakdown(): array
+     {
+diff --git a/app/Livewire/Admin/BulkOutreach.php b/app/Livewire/Admin/BulkOutreach.php
+index 31cb669..f4e6fb7 100644
+--- a/app/Livewire/Admin/BulkOutreach.php
++++ b/app/Livewire/Admin/BulkOutreach.php
+@@ -5,6 +5,7 @@
+ use App\Models\Communication;
+ use App\Models\Product;
+ use App\Models\Team;
++use App\Services\Messenger\MessengerSenderInterface;
+ use App\Services\Sms\SmsSenderInterface;
+ use Illuminate\Support\Facades\Mail;
+ use Livewire\Attributes\Computed;
+@@ -52,11 +53,11 @@ private function baseQuery()
+             ->when($this->favoriteProductFilter, fn($q) => $q->where('favorite_product_id', $this->favoriteProductFilter));
+     }
+ 
+-    public function send(SmsSenderInterface $sms): void
++    public function send(SmsSenderInterface $sms, MessengerSenderInterface $messenger): void
+     {
+         $this->validate([
+             'messageText' => 'required|string|min:3',
+-            'channel' => 'required|in:sms,email',
++            'channel' => 'required|in:sms,email,messenger',
+         ]);
+ 
+         $teams = $this->baseQuery()->get();
+@@ -70,11 +71,18 @@ public function send(SmsSenderInterface $sms): void
+                 continue;
+             }
+ 
++            if ($this->channel === 'messenger' && !$team->phone) {
++                $skippedCount++;
++                continue;
++            }
++
+             $personalizedText = str_replace('{name}', $team->current_name, $this->messageText);
+ 
+-            $delivered = $this->channel === 'sms'
+-                ? $sms->send($team->phone, $personalizedText)
+-                : $this->sendEmail($team->email, $personalizedText);
++            $delivered = match ($this->channel) {
++                'sms' => $sms->send($team->phone, $personalizedText),
++                'messenger' => $messenger->send($team->phone, $personalizedText),
++                default => $this->sendEmail($team->email, $personalizedText),
++            };
+ 
+             Communication::create([
+                 'team_id' => $team->id,
+diff --git a/app/Livewire/Admin/CommunicationDrafts.php b/app/Livewire/Admin/CommunicationDrafts.php
+new file mode 100644
+index 0000000..e01f55b
+--- /dev/null
++++ b/app/Livewire/Admin/CommunicationDrafts.php
+@@ -0,0 +1,107 @@
++<?php
++
++namespace App\Livewire\Admin;
++
++use App\Models\Communication;
++use App\Services\Marketing\SendCommunicationService;
++use Livewire\Attributes\Computed;
++use Livewire\Attributes\Layout;
++use Livewire\Component;
++use Livewire\WithPagination;
++
++/**
++ * Модуль 6: Marketing Engine ежедневно создаёт ЧЕРНОВИКИ предложений (кому, зачем связаться).
++ * Здесь руководитель просматривает черновики, при необходимости правит текст,
++ * выбирает канал и вручную подтверждает реальную отправку — либо отклоняет черновик.
++ */
++#[Layout('layouts.app')]
++class CommunicationDrafts extends Component
++{
++    use WithPagination;
++
++    protected $paginationTheme = 'tailwind';
++
++    public ?int $processingId = null;
++    public string $channel = 'sms';
++    public string $messageText = '';
++
++    #[Computed]
++    public function drafts()
++    {
++        return Communication::drafts()
++            ->with('team')
++            ->orderBy('created_at')
++            ->paginate(20);
++    }
++
++    #[Computed]
++    public function draftsCount(): int
++    {
++        return Communication::drafts()->count();
++    }
++
++    #[Computed]
++    public function processingDraft(): ?Communication
++    {
++        if (! $this->processingId) {
++            return null;
++        }
++
++        return Communication::with('team')->find($this->processingId);
++    }
++
++    public function openDraft(int $id): void
++    {
++        $draft = Communication::with('team')->findOrFail($id);
++
++        $this->processingId = $draft->id;
++        $this->channel = 'sms';
++        $this->messageText = $draft->suggested_message_text ?? '';
++
++        $this->resetErrorBag();
++        $this->modal('process-draft')->show();
++    }
++
++    public function send(SendCommunicationService $service): void
++    {
++        $this->validate([
++            'messageText' => 'required|string|min:3',
++            'channel' => 'required|in:sms,email,messenger',
++        ]);
++
++        $draft = Communication::findOrFail($this->processingId);
++        $service->send($draft, $this->channel, $this->messageText);
++
++        $this->modal('process-draft')->close();
++        $this->resetForm();
++    }
++
++    public function reject(SendCommunicationService $service): void
++    {
++        $draft = Communication::findOrFail($this->processingId);
++        $service->reject($draft);
++
++        $this->modal('process-draft')->close();
++        $this->resetForm();
++    }
++
++    public function closeModal(): void
++    {
++        $this->modal('process-draft')->close();
++        $this->resetForm();
++    }
++
++    private function resetForm(): void
++    {
++        $this->processingId = null;
++        $this->channel = 'sms';
++        $this->messageText = '';
++        $this->resetErrorBag();
++    }
++
++    public function render()
++    {
++        return view('livewire.admin.communication-drafts')
++            ->layoutData(['title' => 'Черновики рассылок']);
++    }
++}
+diff --git a/app/Livewire/Admin/DataImport.php b/app/Livewire/Admin/DataImport.php
+new file mode 100644
+index 0000000..76f7d03
+--- /dev/null
++++ b/app/Livewire/Admin/DataImport.php
+@@ -0,0 +1,52 @@
++<?php
++
++namespace App\Livewire\Admin;
++
++use App\Services\Import\TeamsGamesImportService;
++use Livewire\Attributes\Layout;
++use Livewire\Component;
++use Livewire\WithFileUploads;
++
++/**
++ * Обмен данными с rudagames.com прямо из админки: руководитель выгружает
++ * с сайта xlsx-отчёт по мероприятиям (зарегистрированные команды,
++ * послеигровая статистика) и загружает его сюда — без доступа к серверу
++ * и консольным командам.
++ */
++#[Layout('layouts.app')]
++class DataImport extends Component
++{
++    use WithFileUploads;
++
++    public $file = null;
++
++    public bool $imported = false;
++    public array $stats = [];
++    public array $skipped = [];
++
++    public function import(TeamsGamesImportService $importer): void
++    {
++        $this->validate([
++            'file' => ['required', 'file', 'mimes:xlsx,xls', 'max:10240'],
++        ]);
++
++        $result = $importer->importFromFile($this->file->getRealPath());
++
++        $this->stats = $result['stats'];
++        $this->skipped = $result['skipped'];
++        $this->imported = true;
++
++        $this->file = null;
++    }
++
++    public function resetImport(): void
++    {
++        $this->reset(['file', 'imported', 'stats', 'skipped']);
++    }
++
++    public function render()
++    {
++        return view('livewire.admin.data-import')
++            ->layoutData(['title' => 'Обмен данными']);
++    }
++}
+diff --git a/app/Livewire/Admin/GamesCrud.php b/app/Livewire/Admin/GamesCrud.php
+index 2660a0a..610a41a 100644
+--- a/app/Livewire/Admin/GamesCrud.php
++++ b/app/Livewire/Admin/GamesCrud.php
+@@ -4,6 +4,7 @@
+ 
+ use App\Models\Game;
+ use App\Models\GameCategory;
++use App\Models\GameParticipation;
+ use App\Models\Product;
+ use Illuminate\Support\Carbon;
+ use Livewire\Attributes\Computed;
+@@ -37,12 +38,16 @@ class GamesCrud extends Component
+     public string $actual_revenue = '';
+     public string $actual_expenses = '';
+ 
++    // --- Список команд, участвовавших в игре ---
++    public ?int $teamsGameId = null;
++
+     #[Computed]
+     public function games()
+     {
+         return Game::query()
+             ->with(['product', 'category'])
+             ->withCount('participations')
++            ->withAvg('participations', 'players_count')
+             ->when($this->search !== '', fn ($q) => $q->where('name', 'like', "%{$this->search}%"))
+             ->when($this->productFilter, fn ($q) => $q->where('product_id', $this->productFilter))
+             ->when($this->timeFilter === 'upcoming', fn ($q) => $q->where('played_at', '>', now()))
+@@ -57,6 +62,19 @@ public function products()
+         return Product::orderBy('name')->get();
+     }
+ 
++    #[Computed]
++    public function teamsForOpenGame()
++    {
++        if (! $this->teamsGameId) {
++            return collect();
++        }
++
++        return GameParticipation::with('team')
++            ->where('game_id', $this->teamsGameId)
++            ->orderByDesc('revenue')
++            ->get();
++    }
++
+     #[Computed]
+     public function categoriesForSelectedProduct()
+     {
+@@ -147,6 +165,14 @@ public function delete(int $id): void
+         Game::findOrFail($id)->delete();
+     }
+ 
++    // --- Просмотр команд, участвовавших в игре ---
++
++    public function viewTeams(int $id): void
++    {
++        $this->teamsGameId = $id;
++        $this->modal('teams-for-game')->show();
++    }
++
+     // --- Модуль 2: ручной ввод финансов после игры ---
+ 
+     public function openFinance(int $id): void
+diff --git a/app/Livewire/Admin/PlayersCrud.php b/app/Livewire/Admin/PlayersCrud.php
+index e445c1f..3af6afd 100644
+--- a/app/Livewire/Admin/PlayersCrud.php
++++ b/app/Livewire/Admin/PlayersCrud.php
+@@ -2,6 +2,7 @@
+ 
+ namespace App\Livewire\Admin;
+ 
++use App\Models\Game;
+ use App\Models\Player;
+ use App\Models\Team;
+ use Livewire\Attributes\Computed;
+@@ -31,6 +32,14 @@ public function players()
+     {
+         return Player::query()
+             ->withCount('teams')
++            ->addSelect([
++                'last_game_at' => Game::query()
++                    ->selectRaw('MAX(games.played_at)')
++                    ->join('game_participations', 'game_participations.game_id', '=', 'games.id')
++                    ->join('team_player', 'team_player.team_id', '=', 'game_participations.team_id')
++                    ->whereColumn('team_player.player_id', 'players.id'),
++            ])
++            ->withCasts(['last_game_at' => 'datetime'])
+             ->when($this->search !== '', function ($q) {
+                 $q->where(function ($q2) {
+                     $q2->where('name', 'like', "%{$this->search}%")
+diff --git a/app/Livewire/Admin/TeamsCrud.php b/app/Livewire/Admin/TeamsCrud.php
+index 0d6f31d..e0d694b 100644
+--- a/app/Livewire/Admin/TeamsCrud.php
++++ b/app/Livewire/Admin/TeamsCrud.php
+@@ -2,6 +2,7 @@
+ 
+ namespace App\Livewire\Admin;
+ 
++use App\Models\Communication;
+ use App\Models\Product;
+ use App\Models\Team;
+ use Livewire\Attributes\Computed;
+@@ -28,6 +29,9 @@ class TeamsCrud extends Component
+     public string $email = '';
+     public ?int $favorite_product_id = null;
+ 
++    // --- История коммуникаций (Модуль 7) ---
++    public ?int $historyTeamId = null;
++
+     #[Computed]
+     public function teams()
+     {
+@@ -51,6 +55,19 @@ public function products()
+         return Product::orderBy('name')->get();
+     }
+ 
++    #[Computed]
++    public function historyForOpenTeam()
++    {
++        if (! $this->historyTeamId) {
++            return collect();
++        }
++
++        return Communication::where('team_id', $this->historyTeamId)
++            ->whereNotNull('sent_at')
++            ->orderByDesc('sent_at')
++            ->get();
++    }
++
+     public function lifecycleColor(?string $stage): string
+     {
+         return match ($stage) {
+@@ -152,6 +169,14 @@ public function delete(int $id): void
+         Team::findOrFail($id)->delete();
+     }
+ 
++    // --- История коммуникаций (Модуль 7) ---
++
++    public function viewHistory(int $id): void
++    {
++        $this->historyTeamId = $id;
++        $this->modal('team-history')->show();
++    }
++
+     public function closeModal(): void
+     {
+         $this->modal('team-form')->close();
+diff --git a/app/Livewire/Admin/WeeklyReports.php b/app/Livewire/Admin/WeeklyReports.php
+new file mode 100644
+index 0000000..987c92c
+--- /dev/null
++++ b/app/Livewire/Admin/WeeklyReports.php
+@@ -0,0 +1,39 @@
++<?php
++
++namespace App\Livewire\Admin;
++
++use App\Models\WeeklyReport;
++use App\Services\Reports\WeeklyReportService;
++use Livewire\Attributes\Computed;
++use Livewire\Attributes\Layout;
++use Livewire\Component;
++use Livewire\WithPagination;
++
++#[Layout('layouts.app')]
++class WeeklyReports extends Component
++{
++    use WithPagination;
++
++    protected $paginationTheme = 'tailwind';
++
++    #[Computed]
++    public function reports()
++    {
++        return WeeklyReport::query()
++            ->orderByDesc('period_start')
++            ->paginate(20);
++    }
++
++    public function generatePreviousWeek(WeeklyReportService $service): void
++    {
++        $service->generateForPreviousWeek();
++
++        unset($this->reports);
++    }
++
++    public function render()
++    {
++        return view('livewire.admin.weekly-reports')
++            ->layoutData(['title' => 'Еженедельные отчёты']);
++    }
++}
+diff --git a/app/Models/MonthlyGoal.php b/app/Models/MonthlyGoal.php
+new file mode 100644
+index 0000000..b5edaa1
+--- /dev/null
++++ b/app/Models/MonthlyGoal.php
+@@ -0,0 +1,21 @@
++<?php
++
++namespace App\Models;
++
++use Illuminate\Database\Eloquent\Factories\HasFactory;
++use Illuminate\Database\Eloquent\Model;
++
++class MonthlyGoal extends Model
++{
++    use HasFactory;
++
++    protected $fillable = [
++        'month',
++        'target_revenue',
++    ];
++
++    protected $casts = [
++        'month' => 'date',
++        'target_revenue' => 'decimal:2',
++    ];
++}
+diff --git a/app/Providers/AppServiceProvider.php b/app/Providers/AppServiceProvider.php
+index f1525e9..e87474c 100644
+--- a/app/Providers/AppServiceProvider.php
++++ b/app/Providers/AppServiceProvider.php
+@@ -2,6 +2,10 @@
+ 
+ namespace App\Providers;
+ 
++use App\Services\Messenger\LoggingMessengerSender;
++use App\Services\Messenger\MessengerSenderInterface;
++use App\Services\Sms\LoggingSmsSender;
++use App\Services\Sms\SmsSenderInterface;
+ use Carbon\CarbonImmutable;
+ use Illuminate\Support\Facades\Date;
+ use Illuminate\Support\Facades\DB;
+@@ -15,7 +19,9 @@ class AppServiceProvider extends ServiceProvider
+      */
+     public function register(): void
+     {
+-        //
++        // Заглушки-логгеры до подключения реальных провайдеров SMS/мессенджера.
++        $this->app->bind(SmsSenderInterface::class, LoggingSmsSender::class);
++        $this->app->bind(MessengerSenderInterface::class, LoggingMessengerSender::class);
+     }
+ 
+     /**
+diff --git a/app/Services/Import/TeamsGamesImportService.php b/app/Services/Import/TeamsGamesImportService.php
+new file mode 100644
+index 0000000..fb2376e
+--- /dev/null
++++ b/app/Services/Import/TeamsGamesImportService.php
+@@ -0,0 +1,162 @@
++<?php
++
++namespace App\Services\Import;
++
++use App\Models\Game;
++use App\Models\GameCategory;
++use App\Models\GameParticipation;
++use App\Models\Product;
++use App\Models\Team;
++use App\Models\TeamNameHistory;
++use Illuminate\Support\Facades\DB;
++use Maatwebsite\Excel\Facades\Excel;
++
++/**
++ * Обмен данными с rudagames.com: разбирает xlsx-выгрузку сайта (мероприятия,
++ * зарегистрированные команды, послеигровая статистика) и загружает её в CRM.
++ *
++ * Используется как из консольной команды `import:teams-games`, так и из
++ * админ-панели (App\Livewire\Admin\DataImport), чтобы руководитель мог
++ * загрузить выгрузку самостоятельно, без доступа к серверу.
++ */
++class TeamsGamesImportService
++{
++    private const FALLBACK_CATEGORY = 'Без категории';
++
++    /**
++     * @return array{stats: array<string, int>, skipped: array<int, array<string, mixed>>}
++     */
++    public function importFromFile(string $path): array
++    {
++        $rows = Excel::toArray([], $path)[0];
++        $header = array_map('trim', array_shift($rows));
++
++        $stats = [
++            'processed' => 0,
++            'skipped' => 0,
++            'teams_created' => 0,
++            'teams_renamed' => 0,
++            'games_created' => 0,
++        ];
++        $skippedRows = [];
++
++        foreach ($rows as $i => $row) {
++            $rowNum = $i + 2; // +2: заголовок + 1-индексация Excel
++            $data = array_combine($header, $row);
++
++            $phone = $this->normalizePhone($data['Телефон'] ?? '');
++
++            if (strlen($phone) !== 11) {
++                $skippedRows[] = [
++                    'row' => $rowNum,
++                    'team' => $data['Команда'] ?? '',
++                    'phone' => $data['Телефон'] ?? '',
++                    'reason' => 'Некорректный телефон после нормализации: '.$phone,
++                ];
++                $stats['skipped']++;
++                continue;
++            }
++
++            try {
++                DB::transaction(function () use ($data, $phone, &$stats) {
++                    $product = Product::firstOrCreate(['name' => trim($data['Продукт'])]);
++
++                    $categoryName = trim($data['Категория'] ?? '') ?: self::FALLBACK_CATEGORY;
++                    $category = GameCategory::firstOrCreate([
++                        'product_id' => $product->id,
++                        'name' => $categoryName,
++                    ]);
++
++                    $playedAt = $this->parseDate($data['Дата игры']);
++
++                    $game = Game::firstOrCreate(
++                        [
++                            'product_id' => $product->id,
++                            'category_id' => $category->id,
++                            'name' => trim($data['Пакет']),
++                            'played_at' => $playedAt,
++                        ]
++                    );
++                    if ($game->wasRecentlyCreated) {
++                        $stats['games_created']++;
++                    }
++
++                    $teamName = trim($data['Команда']);
++                    $team = Team::firstOrNew(['phone' => $phone]);
++                    $isNewTeam = ! $team->exists;
++
++                    if ($isNewTeam) {
++                        $team->current_name = $teamName;
++                        $team->captain_name = trim($data['Имя капитана'] ?? '') ?: null;
++                        $team->email = trim($data['Почта'] ?? '') ?: null;
++                        $team->save();
++                        $stats['teams_created']++;
++
++                        TeamNameHistory::create([
++                            'team_id' => $team->id,
++                            'name' => $teamName,
++                            'used_at' => $playedAt,
++                        ]);
++                    } elseif ($team->current_name !== $teamName) {
++                        // команда играла раньше под другим именем — фиксируем историю
++                        TeamNameHistory::firstOrCreate([
++                            'team_id' => $team->id,
++                            'name' => $teamName,
++                            'used_at' => $playedAt,
++                        ]);
++
++                        if ($playedAt >= ($team->last_game_at ?? $playedAt)) {
++                            $team->current_name = $teamName;
++                            $team->save();
++                        }
++                        $stats['teams_renamed']++;
++                    }
++
++                    GameParticipation::firstOrCreate(
++                        [
++                            'game_id' => $game->id,
++                            'team_id' => $team->id,
++                        ],
++                        [
++                            'team_name_at_time' => $teamName,
++                            'players_count' => (int) $data['Игроков сыграло'],
++                            'revenue' => (float) $data['Выручка за команду'],
++                        ]
++                    );
++                });
++
++                $stats['processed']++;
++            } catch (\Throwable $e) {
++                $skippedRows[] = [
++                    'row' => $rowNum,
++                    'team' => $data['Команда'] ?? '',
++                    'phone' => $data['Телефон'] ?? '',
++                    'reason' => 'Ошибка: '.$e->getMessage(),
++                ];
++                $stats['skipped']++;
++            }
++        }
++
++        return ['stats' => $stats, 'skipped' => $skippedRows];
++    }
++
++    private function normalizePhone(string $phone): string
++    {
++        return preg_replace('/\D/', '', $phone);
++    }
++
++    private function parseDate($value): string
++    {
++        if ($value instanceof \DateTimeInterface) {
++            return $value->format('Y-m-d H:i:s');
++        }
++
++        // Excel иногда отдаёт дату как serial number
++        if (is_numeric($value)) {
++            return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($value)
++                ->format('Y-m-d H:i:s');
++        }
++
++        return date('Y-m-d H:i:s', strtotime((string) $value));
++    }
++}
+diff --git a/app/Services/Marketing/SendCommunicationService.php b/app/Services/Marketing/SendCommunicationService.php
+index 4a7fdee..726c88b 100644
+--- a/app/Services/Marketing/SendCommunicationService.php
++++ b/app/Services/Marketing/SendCommunicationService.php
+@@ -3,13 +3,16 @@
+ namespace App\Services\Marketing;
+ 
+ use App\Models\Communication;
++use App\Services\Messenger\MessengerSenderInterface;
+ use App\Services\Sms\SmsSenderInterface;
+ use Illuminate\Support\Facades\Mail;
+ 
+ class SendCommunicationService
+ {
+-    public function __construct(private readonly SmsSenderInterface $sms)
+-    {
++    public function __construct(
++        private readonly SmsSenderInterface $sms,
++        private readonly MessengerSenderInterface $messenger,
++    ) {
+     }
+ 
+     /**
+@@ -18,7 +21,7 @@ public function __construct(private readonly SmsSenderInterface $sms)
+      * и (опционально) отредактировал текст.
+      *
+      * @param Communication $communication Черновик со статусом "черновик"
+-     * @param string $channel "sms" или "email"
++     * @param string $channel "sms", "email" или "messenger"
+      * @param string $finalMessageText Финальный текст (после правок руководителя)
+      */
+     public function send(Communication $communication, string $channel, string $finalMessageText): bool
+@@ -26,6 +29,7 @@ public function send(Communication $communication, string $channel, string $fina
+         $team = $communication->team;
+         $sent = match ($channel) {
+             'sms' => $this->sms->send($team->phone, $finalMessageText),
++            'messenger' => $this->messenger->send($team->phone, $finalMessageText),
+             'email' => $this->sendEmail($team->email, $finalMessageText),
+             default => throw new \InvalidArgumentException("Неизвестный канал: {$channel}"),
+         };
+diff --git a/app/Services/Messenger/LoggingMessengerSender.php b/app/Services/Messenger/LoggingMessengerSender.php
+new file mode 100644
+index 0000000..ea3d7af
+--- /dev/null
++++ b/app/Services/Messenger/LoggingMessengerSender.php
+@@ -0,0 +1,24 @@
++<?php
++
++namespace App\Services\Messenger;
++
++use Illuminate\Support\Facades\Log;
++
++/**
++ * Временная заглушка. Не отправляет реальные сообщения в мессенджер — только логирует.
++ * Когда подключим WhatsApp/Telegram-провайдера (например WhatsApp Business API или
++ * Telegram Bot API) — заменить на реальную реализацию MessengerSenderInterface
++ * и указать её в AppServiceProvider (bind).
++ */
++class LoggingMessengerSender implements MessengerSenderInterface
++{
++    public function send(string $phone, string $message): bool
++    {
++        Log::info('[Мессенджер заглушка] Отправка сообщения', [
++            'phone' => $phone,
++            'message' => $message,
++        ]);
++
++        return true;
++    }
++}
+diff --git a/app/Services/Messenger/MessengerSenderInterface.php b/app/Services/Messenger/MessengerSenderInterface.php
+new file mode 100644
+index 0000000..675619c
+--- /dev/null
++++ b/app/Services/Messenger/MessengerSenderInterface.php
+@@ -0,0 +1,13 @@
++<?php
++
++namespace App\Services\Messenger;
++
++interface MessengerSenderInterface
++{
++    /**
++     * Отправляет сообщение в мессенджер (WhatsApp/Telegram и т.п.).
++     *
++     * @return bool true, если сообщение принято провайдером к отправке
++     */
++    public function send(string $phone, string $message): bool;
++}
+diff --git a/app/Services/Reports/WeeklyReportService.php b/app/Services/Reports/WeeklyReportService.php
+new file mode 100644
+index 0000000..ab6abe6
+--- /dev/null
++++ b/app/Services/Reports/WeeklyReportService.php
+@@ -0,0 +1,185 @@
++<?php
++
++namespace App\Services\Reports;
++
++use App\Models\Communication;
++use App\Models\Game;
++use App\Models\GameParticipation;
++use App\Models\Team;
++use App\Models\WeeklyReport;
++use Illuminate\Support\Carbon;
++use Illuminate\Support\Facades\DB;
++
++/**
++ * Модуль 8: еженедельный отчёт (без AI-выводов — они формируются отдельно через Claude API
++ * и дописываются в поле ai_summary уже после создания отчёта этим сервисом).
++ *
++ * Часть метрик (потерянные/реактивированные команды, конверсия SMS) не хранится как явные
++ * статусные переходы в БД, поэтому считается эвристически — см. комментарии у каждого блока.
++ */
++class WeeklyReportService
++{
++    public function generateFor(Carbon $periodStart, Carbon $periodEnd): WeeklyReport
++    {
++        $periodStart = $periodStart->copy()->startOfDay();
++        $periodEnd = $periodEnd->copy()->endOfDay();
++
++        $sales = $this->calculateSales($periodStart, $periodEnd);
++        $clients = $this->calculateClients($periodStart, $periodEnd);
++        $marketing = $this->calculateMarketing($periodStart, $periodEnd);
++
++        return WeeklyReport::updateOrCreate(
++            [
++                'period_start' => $periodStart->toDateString(),
++                'period_end' => $periodEnd->toDateString(),
++            ],
++            [...$sales, ...$clients, ...$marketing]
++        );
++    }
++
++    /**
++     * Предыдущая календарная неделя (пн-вс) — удобный дефолт для планового запуска по расписанию.
++     */
++    public function generateForPreviousWeek(): WeeklyReport
++    {
++        $start = now()->subWeek()->startOfWeek();
++        $end = now()->subWeek()->endOfWeek();
++
++        return $this->generateFor($start, $end);
++    }
++
++    private function calculateSales(Carbon $start, Carbon $end): array
++    {
++        $participations = GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->whereBetween('games.played_at', [$start, $end]);
++
++        $revenue = (clone $participations)->sum('game_participations.revenue');
++        $teamsCount = (clone $participations)->count();
++        $avgTeamSize = (clone $participations)->avg('game_participations.players_count');
++
++        // Прибыль считаем по играм с уже внесёнными фактическими финансами (Модуль 2)
++        $profit = Game::query()
++            ->whereBetween('played_at', [$start, $end])
++            ->whereNotNull('actual_revenue')
++            ->whereNotNull('actual_expenses')
++            ->selectRaw('COALESCE(SUM(actual_revenue - actual_expenses), 0) as profit')
++            ->value('profit');
++
++        return [
++            'revenue' => (float) $revenue,
++            'profit' => (float) $profit,
++            'avg_check' => $teamsCount > 0 ? round($revenue / $teamsCount, 2) : null,
++            'avg_team_size' => $avgTeamSize !== null ? round((float) $avgTeamSize, 2) : null,
++        ];
++    }
++
++    private function calculateClients(Carbon $start, Carbon $end): array
++    {
++        // Новые: первая игра команды пришлась на этот период
++        $newTeamsCount = Team::query()
++            ->whereBetween('first_game_at', [$start, $end])
++            ->count();
++
++        // Повторные: играли в этот период, но не впервые
++        $returningTeamsCount = GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->join('teams', 'teams.id', '=', 'game_participations.team_id')
++            ->whereBetween('games.played_at', [$start, $end])
++            ->where(function ($q) use ($start) {
++                $q->whereNull('teams.first_game_at')
++                    ->orWhere('teams.first_game_at', '<', $start);
++            })
++            ->distinct('game_participations.team_id')
++            ->count('game_participations.team_id');
++
++        // Потерянные: команда сейчас "потерянная", и её последняя игра была ровно настолько давно
++        // (365+ дней — порог из teams:recalculate-profiles), что статус "потерянная" наступил
++        // именно в этом периоде. Эвристика, т.к. явной истории смены статусов не ведётся.
++        $lostTeamsCount = Team::query()
++            ->where('activity_status', 'потерянная')
++            ->whereBetween('last_game_at', [
++                $start->copy()->subDays(365),
++                $end->copy()->subDays(365),
++            ])
++            ->count();
++
++        // Реактивированные: сыграли в этот период после перерыва 90+ дней с предыдущей игры
++        // (90 дней — порог "остывающая"→"спящая" из teams:recalculate-profiles).
++        $reactivatedTeamsCount = $this->countReactivatedTeams($start, $end);
++
++        return [
++            'new_teams_count' => $newTeamsCount,
++            'returning_teams_count' => $returningTeamsCount,
++            'lost_teams_count' => $lostTeamsCount,
++            'reactivated_teams_count' => $reactivatedTeamsCount,
++        ];
++    }
++
++    private function countReactivatedTeams(Carbon $start, Carbon $end): int
++    {
++        $teamIds = GameParticipation::query()
++            ->join('games', 'games.id', '=', 'game_participations.game_id')
++            ->whereBetween('games.played_at', [$start, $end])
++            ->pluck('game_participations.team_id')
++            ->unique();
++
++        if ($teamIds->isEmpty()) {
++            return 0;
++        }
++
++        $count = 0;
++
++        foreach ($teamIds as $teamId) {
++            $gamesInPeriod = DB::table('game_participations')
++                ->join('games', 'games.id', '=', 'game_participations.game_id')
++                ->where('game_participations.team_id', $teamId)
++                ->whereBetween('games.played_at', [$start, $end])
++                ->pluck('games.played_at');
++
++            $earliestThisPeriod = $gamesInPeriod->min();
++
++            $previousGame = DB::table('game_participations')
++                ->join('games', 'games.id', '=', 'game_participations.game_id')
++                ->where('game_participations.team_id', $teamId)
++                ->where('games.played_at', '<', $earliestThisPeriod)
++                ->max('games.played_at');
++
++            if ($previousGame && Carbon::parse($previousGame)->diffInDays(Carbon::parse($earliestThisPeriod)) >= 90) {
++                $count++;
++            }
++        }
++
++        return $count;
++    }
++
++    private function calculateMarketing(Carbon $start, Carbon $end): array
++    {
++        $smsSentCount = Communication::query()
++            ->where('channel', 'sms')
++            ->where('status', Communication::STATUS_SENT)
++            ->whereBetween('sent_at', [$start, $end])
++            ->count();
++
++        // Конверсия: команде отправили SMS в этот период, и она зарегистрировалась
++        // на игру в течение 14 дней после отправки.
++        $smsConversionCount = Communication::query()
++            ->where('channel', 'sms')
++            ->where('status', Communication::STATUS_SENT)
++            ->whereBetween('sent_at', [$start, $end])
++            ->get()
++            ->filter(function (Communication $comm) {
++                return GameParticipation::query()
++                    ->join('games', 'games.id', '=', 'game_participations.game_id')
++                    ->where('game_participations.team_id', $comm->team_id)
++                    ->whereBetween('games.played_at', [$comm->sent_at, $comm->sent_at->copy()->addDays(14)])
++                    ->exists();
++            })
++            ->count();
++
++        return [
++            'sms_sent_count' => $smsSentCount,
++            'sms_conversion_count' => $smsConversionCount,
++        ];
++    }
++}
+diff --git a/database/migrations/2026_07_09_070000_create_monthly_goals_table.php b/database/migrations/2026_07_09_070000_create_monthly_goals_table.php
+new file mode 100644
+index 0000000..b536745
+--- /dev/null
++++ b/database/migrations/2026_07_09_070000_create_monthly_goals_table.php
+@@ -0,0 +1,23 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    public function up(): void
++    {
++        Schema::create('monthly_goals', function (Blueprint $table) {
++            $table->id();
++            $table->date('month')->unique(); // всегда первое число месяца
++            $table->decimal('target_revenue', 12, 2);
++            $table->timestamps();
++        });
++    }
++
++    public function down(): void
++    {
++        Schema::dropIfExists('monthly_goals');
++    }
++};
+diff --git a/resources/views/layouts/app/sidebar.blade.php b/resources/views/layouts/app/sidebar.blade.php
+index e22b493..5fb773f 100644
+--- a/resources/views/layouts/app/sidebar.blade.php
++++ b/resources/views/layouts/app/sidebar.blade.php
+@@ -14,6 +14,10 @@
+                 {{ __('Аналитика') }}
+             </flux:sidebar.item>
+ 
++            <flux:sidebar.item icon="document-chart-bar" :href="route('admin.reports')" :current="request()->routeIs('admin.reports')" wire:navigate>
++                {{ __('Еженедельные отчёты') }}
++            </flux:sidebar.item>
++
+             <flux:sidebar.item icon="users" :href="route('admin.teams')" :current="request()->routeIs('admin.teams')" wire:navigate>
+                 {{ __('Команды') }}
+             </flux:sidebar.item>
+@@ -21,6 +25,10 @@
+                 {{ __('Рассылка') }}
+             </flux:sidebar.item>
+ 
++            <flux:sidebar.item icon="inbox-stack" :href="route('admin.drafts')" :current="request()->routeIs('admin.drafts')" wire:navigate>
++                {{ __('Черновики рассылок') }}
++            </flux:sidebar.item>
++
+             <flux:sidebar.item icon="squares-2x2" :href="route('admin.products')" :current="request()->routeIs('admin.products')" wire:navigate>
+                 {{ __('Продукты') }}
+             </flux:sidebar.item>
+@@ -33,6 +41,10 @@
+                 {{ __('Игроки') }}
+             </flux:sidebar.item>
+ 
++            <flux:sidebar.item icon="arrow-up-tray" :href="route('admin.import')" :current="request()->routeIs('admin.import')" wire:navigate>
++                {{ __('Обмен данными') }}
++            </flux:sidebar.item>
++
+ 
+ 
+             <flux:spacer />
+diff --git a/resources/views/livewire/admin/analytics-dashboard.blade.php b/resources/views/livewire/admin/analytics-dashboard.blade.php
+index 9e2bb9e..8b28f49 100644
+--- a/resources/views/livewire/admin/analytics-dashboard.blade.php
++++ b/resources/views/livewire/admin/analytics-dashboard.blade.php
+@@ -5,9 +5,85 @@
+ <div class="flex flex-col gap-6">
+     <div class="flex items-center justify-between">
+         <flux:heading size="xl">Аналитика</flux:heading>
+-        <flux:text variant="subtle">За последние 30 дней</flux:text>
++        <flux:text variant="subtle">{{ now()->format('d.m.Y') }}</flux:text>
+     </div>
+ 
++    <flux:card class="space-y-4">
++        <flux:heading size="md">Сегодня</flux:heading>
++        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
++            <div>
++                <flux:text size="sm" variant="subtle">Новые регистрации</flux:text>
++                <flux:heading size="lg">{{ $this->todayKpis['new_registrations_today'] }}</flux:heading>
++            </div>
++            <div>
++                <flux:text size="sm" variant="subtle">Команд на этой неделе</flux:text>
++                <flux:heading size="lg">{{ $this->todayKpis['teams_this_week'] }}</flux:heading>
++            </div>
++            <div>
++                <flux:text size="sm" variant="subtle">Ожидаемая выручка</flux:text>
++                <flux:heading size="lg">{{ number_format($this->todayKpis['expected_revenue'], 0, ',', ' ') }} ₽</flux:heading>
++            </div>
++            <div>
++                <flux:text size="sm" variant="subtle">Нужно вернуть</flux:text>
++                <flux:heading size="lg" class="text-amber-600 dark:text-amber-400">{{ $this->todayKpis['need_to_return'] }}</flux:heading>
++            </div>
++            <div>
++                <flux:text size="sm" variant="subtle">SMS сегодня</flux:text>
++                <flux:heading size="lg">{{ $this->todayKpis['sms_today'] }}</flux:heading>
++            </div>
++        </div>
++    </flux:card>
++
++    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
++        <flux:card class="space-y-3">
++            <flux:heading size="md">Главные события</flux:heading>
++            <ul class="space-y-2">
++                <li class="flex items-center gap-2">
++                    <flux:icon name="sparkles" class="w-4 h-4 text-blue-500 shrink-0" />
++                    <flux:text size="sm">{{ $this->mainEvents['new_teams'] }} новых команд за последние 7 дней.</flux:text>
++                </li>
++                <li class="flex items-center gap-2">
++                    <flux:icon name="trophy" class="w-4 h-4 text-purple-500 shrink-0" />
++                    <flux:text size="sm">{{ $this->mainEvents['milestones_reached'] }} команд достигли нового уровня и ждут поздравления.</flux:text>
++                </li>
++                <li class="flex items-center gap-2">
++                    <flux:icon name="phone" class="w-4 h-4 text-amber-500 shrink-0" />
++                    <flux:text size="sm">{{ $this->mainEvents['need_contact'] }} команд требуют контакта — см. «Черновики рассылок».</flux:text>
++                </li>
++                <li class="flex items-center gap-2">
++                    <flux:icon name="arrow-path" class="w-4 h-4 text-teal-500 shrink-0" />
++                    <flux:text size="sm">{{ $this->mainEvents['need_second_game'] }} новых команд стоит довести до второй игры.</flux:text>
++                </li>
++            </ul>
++        </flux:card>
++
++        <flux:card class="space-y-3">
++            <flux:heading size="md">Цель месяца</flux:heading>
++            @if ($this->currentMonthGoal)
++                <div class="space-y-2">
++                    <div class="flex items-baseline justify-between">
++                        <flux:text size="sm" variant="subtle">
++                            {{ number_format($this->currentMonthRevenue, 0, ',', ' ') }} ₽ из {{ number_format($this->currentMonthGoal->target_revenue, 0, ',', ' ') }} ₽
++                        </flux:text>
++                        <flux:text size="sm" class="font-semibold">{{ $this->monthGoalProgressPercent }}%</flux:text>
++                    </div>
++                    <div class="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
++                        <div class="h-full bg-green-500" style="width: {{ $this->monthGoalProgressPercent }}%"></div>
++                    </div>
++                </div>
++            @else
++                <flux:text size="sm" variant="subtle">Цель на этот месяц ещё не задана.</flux:text>
++                <div class="flex gap-2">
++                    <flux:input wire:model="goalInput" type="number" placeholder="Целевая выручка, ₽" class="flex-1" />
++                    <flux:button wire:click="saveGoal" variant="primary">Задать</flux:button>
++                </div>
++                @error('goalInput') <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text> @enderror
++            @endif
++        </flux:card>
++    </div>
++
++    <flux:text variant="subtle">За последние 30 дней</flux:text>
++
+     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+         <flux:card class="space-y-1">
+             <flux:text size="sm" variant="subtle">Выручка</flux:text>
+diff --git a/resources/views/livewire/admin/bulk-outreach.blade.php b/resources/views/livewire/admin/bulk-outreach.blade.php
+index ece6975..6f97d95 100644
+--- a/resources/views/livewire/admin/bulk-outreach.blade.php
++++ b/resources/views/livewire/admin/bulk-outreach.blade.php
+@@ -5,7 +5,7 @@
+     <flux:callout variant="success" icon="check-circle">
+         <flux:callout.heading>Рассылка завершена</flux:callout.heading>
+         <flux:callout.text>
+-            Отправлено: {{ $sentCount }}. Пропущено (нет email или ошибка): {{ $skippedCount }}.
++            Отправлено: {{ $sentCount }}. Пропущено (нет email/телефона или ошибка): {{ $skippedCount }}.
+         </flux:callout.text>
+         <x-slot name="actions">
+             <flux:button wire:click="resetOutreach">Новая рассылка</flux:button>
+@@ -53,7 +53,15 @@
+         <flux:select wire:model="channel" label="Канал отправки">
+             <flux:select.option value="sms">SMS</flux:select.option>
+             <flux:select.option value="email">Email (команды без email будут пропущены)</flux:select.option>
++            <flux:select.option value="messenger">Мессенджер — WhatsApp/Telegram (команды без телефона будут пропущены)</flux:select.option>
+         </flux:select>
++        @if ($channel === 'messenger')
++            <flux:callout variant="warning" icon="exclamation-triangle">
++                <flux:callout.text>
++                    Реальный провайдер мессенджера ещё не подключён — сообщения пока только логируются (заглушка), как и раньше было с SMS.
++                </flux:callout.text>
++            </flux:callout>
++        @endif
+ 
+         <flux:textarea
+             wire:model="messageText"
+diff --git a/resources/views/livewire/admin/communication-drafts.blade.php b/resources/views/livewire/admin/communication-drafts.blade.php
+new file mode 100644
+index 0000000..a93ea68
+--- /dev/null
++++ b/resources/views/livewire/admin/communication-drafts.blade.php
+@@ -0,0 +1,109 @@
++<div class="flex flex-col gap-4">
++    <div class="flex items-center justify-between">
++        <flux:heading size="xl">Черновики рассылок</flux:heading>
++        <flux:badge color="amber" size="lg">{{ $this->draftsCount }} ждут решения</flux:badge>
++    </div>
++
++    <flux:text variant="subtle">
++        Каждый день Marketing Engine анализирует базу команд и предлагает, с кем и зачем связаться.
++        Реальную отправку — канал и финальный текст — подтверждает руководитель здесь.
++    </flux:text>
++
++    <flux:table>
++        <flux:table.columns>
++            <flux:table.column>Команда</flux:table.column>
++            <flux:table.column>Цель</flux:table.column>
++            <flux:table.column>Создан</flux:table.column>
++            <flux:table.column>Предложенный текст</flux:table.column>
++            <flux:table.column></flux:table.column>
++        </flux:table.columns>
++
++        <flux:table.rows>
++            @forelse ($this->drafts as $draft)
++                <flux:table.row wire:key="draft-{{ $draft->id }}">
++                    <flux:table.cell>
++                        <div class="font-medium">{{ $draft->team->current_name ?? '— команда удалена —' }}</div>
++                    </flux:table.cell>
++                    <flux:table.cell>
++                        <flux:badge color="blue" size="sm">{{ $draft->goal }}</flux:badge>
++                    </flux:table.cell>
++                    <flux:table.cell>
++                        <flux:text size="sm" variant="subtle">{{ $draft->created_at->format('d.m.Y') }}</flux:text>
++                    </flux:table.cell>
++                    <flux:table.cell>
++                        <flux:text size="sm" variant="subtle" class="line-clamp-1 max-w-xs">
++                            {{ $draft->suggested_message_text }}
++                        </flux:text>
++                    </flux:table.cell>
++                    <flux:table.cell>
++                        <div class="flex justify-end">
++                            <flux:button size="sm" variant="primary" wire:click="openDraft({{ $draft->id }})">
++                                Обработать
++                            </flux:button>
++                        </div>
++                    </flux:table.cell>
++                </flux:table.row>
++            @empty
++                <flux:table.row>
++                    <flux:table.cell colspan="5">
++                        <flux:text variant="subtle">Черновиков нет — все обработаны.</flux:text>
++                    </flux:table.cell>
++                </flux:table.row>
++            @endforelse
++        </flux:table.rows>
++    </flux:table>
++
++    {{ $this->drafts->links() }}
++
++    <flux:modal name="process-draft" class="max-w-xl">
++        @if ($this->processingDraft)
++            <div class="space-y-6">
++                <div>
++                    <flux:heading size="lg">{{ $this->processingDraft->team->current_name ?? '— команда удалена —' }}</flux:heading>
++                    <flux:badge color="blue" size="sm" class="mt-1">{{ $this->processingDraft->goal }}</flux:badge>
++                </div>
++
++                <flux:callout variant="secondary" icon="light-bulb">
++                    <flux:callout.heading>Предложенный текст</flux:callout.heading>
++                    <flux:callout.text>{{ $this->processingDraft->suggested_message_text }}</flux:callout.text>
++                </flux:callout>
++
++                <flux:select wire:model="channel" label="Канал отправки">
++                    <flux:select.option value="sms">SMS</flux:select.option>
++                    <flux:select.option value="email">Email</flux:select.option>
++                    <flux:select.option value="messenger">Мессенджер (WhatsApp/Telegram)</flux:select.option>
++                </flux:select>
++
++                <flux:textarea
++                    wire:model="messageText"
++                    label="Финальный текст сообщения"
++                    rows="4"
++                />
++                @error('messageText') <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text> @enderror
++
++                <div class="flex justify-between gap-2">
++                    <flux:button
++                        variant="ghost"
++                        wire:click="reject"
++                        wire:confirm="Отклонить этот черновик? Он больше не будет предложен по этой цели, пока не появятся новые основания."
++                    >
++                        Отклонить
++                    </flux:button>
++
++                    <div class="flex gap-2">
++                        <flux:modal.close>
++                            <flux:button variant="filled" wire:click="closeModal">Закрыть</flux:button>
++                        </flux:modal.close>
++                        <flux:button
++                            variant="primary"
++                            wire:click="send"
++                            wire:confirm="Отправить это сообщение команде «{{ $this->processingDraft->team->current_name ?? '' }}»?"
++                        >
++                            Отправить
++                        </flux:button>
++                    </div>
++                </div>
++            </div>
++        @endif
++    </flux:modal>
++</div>
+diff --git a/resources/views/livewire/admin/data-import.blade.php b/resources/views/livewire/admin/data-import.blade.php
+new file mode 100644
+index 0000000..9b3610a
+--- /dev/null
++++ b/resources/views/livewire/admin/data-import.blade.php
+@@ -0,0 +1,95 @@
++<div class="flex flex-col gap-6">
++    <flux:heading size="xl">Обмен данными с rudagames.com</flux:heading>
++
++    <flux:text variant="subtle">
++        Выгрузите с сайта rudagames.com xlsx-отчёт по мероприятиям (зарегистрированные команды и
++        послеигровая статистика) и загрузите его здесь — данные попадут в CRM автоматически,
++        без обращения к разработчикам.
++    </flux:text>
++
++    @if ($imported)
++        <flux:callout variant="success" icon="check-circle">
++            <flux:callout.heading>Импорт завершён</flux:callout.heading>
++            <flux:callout.text>
++                <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-2">
++                    <div>
++                        <div class="text-2xl font-semibold">{{ $stats['processed'] ?? 0 }}</div>
++                        <flux:text size="sm" variant="subtle">строк обработано</flux:text>
++                    </div>
++                    <div>
++                        <div class="text-2xl font-semibold">{{ $stats['games_created'] ?? 0 }}</div>
++                        <flux:text size="sm" variant="subtle">новых игр</flux:text>
++                    </div>
++                    <div>
++                        <div class="text-2xl font-semibold">{{ $stats['teams_created'] ?? 0 }}</div>
++                        <flux:text size="sm" variant="subtle">новых команд</flux:text>
++                    </div>
++                    <div>
++                        <div class="text-2xl font-semibold">{{ $stats['teams_renamed'] ?? 0 }}</div>
++                        <flux:text size="sm" variant="subtle">переименований команд</flux:text>
++                    </div>
++                    <div>
++                        <div class="text-2xl font-semibold">{{ $stats['skipped'] ?? 0 }}</div>
++                        <flux:text size="sm" variant="subtle">строк пропущено</flux:text>
++                    </div>
++                </div>
++            </flux:callout.text>
++            <x-slot name="actions">
++                <flux:button wire:click="resetImport">Загрузить ещё файл</flux:button>
++            </x-slot>
++        </flux:callout>
++
++        @if (! empty($skipped))
++            <flux:card class="space-y-3">
++                <flux:heading size="md">Пропущенные строки</flux:heading>
++                <flux:table>
++                    <flux:table.columns>
++                        <flux:table.column>Строка</flux:table.column>
++                        <flux:table.column>Команда</flux:table.column>
++                        <flux:table.column>Телефон</flux:table.column>
++                        <flux:table.column>Причина</flux:table.column>
++                    </flux:table.columns>
++                    <flux:table.rows>
++                        @foreach ($skipped as $row)
++                            <flux:table.row>
++                                <flux:table.cell>{{ $row['row'] }}</flux:table.cell>
++                                <flux:table.cell>{{ $row['team'] }}</flux:table.cell>
++                                <flux:table.cell>{{ $row['phone'] }}</flux:table.cell>
++                                <flux:table.cell>{{ $row['reason'] }}</flux:table.cell>
++                            </flux:table.row>
++                        @endforeach
++                    </flux:table.rows>
++                </flux:table>
++            </flux:card>
++        @endif
++    @else
++        <flux:card class="space-y-4">
++            <flux:heading size="md">Файл выгрузки (.xlsx)</flux:heading>
++
++            <input type="file" wire:model="file" accept=".xlsx,.xls" />
++
++            <div wire:loading wire:target="file">
++                <flux:text size="sm" variant="subtle">Загрузка файла...</flux:text>
++            </div>
++
++            @error('file') <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text> @enderror
++
++            @if ($file)
++                <flux:callout variant="secondary" icon="document">
++                    <flux:callout.text>Выбран файл: {{ $file->getClientOriginalName() }}</flux:callout.text>
++                </flux:callout>
++            @endif
++
++            <div class="flex justify-end">
++                <flux:button
++                    variant="primary"
++                    wire:click="import"
++                    wire:loading.attr="disabled"
++                    wire:target="import"
++                >
++                    Импортировать
++                </flux:button>
++            </div>
++        </flux:card>
++    @endif
++</div>
+diff --git a/resources/views/livewire/admin/games-crud.blade.php b/resources/views/livewire/admin/games-crud.blade.php
+index c2083cd..c20a31d 100644
+--- a/resources/views/livewire/admin/games-crud.blade.php
++++ b/resources/views/livewire/admin/games-crud.blade.php
+@@ -61,12 +61,21 @@ class="sm:w-1/2"
+                             <flux:text size="sm">
+                                 Прибыль: {{ number_format($game->profit, 0, ',', ' ') }} ₽
+                             </flux:text>
++                            @if ($game->participations_count > 0)
++                                <flux:text size="sm" variant="subtle">
++                                    Ср. чек: {{ number_format($game->actual_revenue / $game->participations_count, 0, ',', ' ') }} ₽
++                                    · Ср. команда: {{ round($game->participations_avg_players_count, 1) }}
++                                </flux:text>
++                            @endif
+                         @else
+                             <flux:badge color="amber" size="sm">не внесены</flux:badge>
+                         @endif
+                     </flux:table.cell>
+                     <flux:table.cell>
+                         <div class="flex gap-2 justify-end">
++                            <flux:button size="sm" variant="ghost" wire:click="viewTeams({{ $game->id }})">
++                                Команды
++                            </flux:button>
+                             <flux:button size="sm" variant="ghost" wire:click="openFinance({{ $game->id }})">
+                                 Финансы
+                             </flux:button>
+@@ -152,4 +161,50 @@ class="sm:w-1/2"
+             </div>
+         </div>
+     </flux:modal>
++
++    <flux:modal name="teams-for-game" class="max-w-2xl">
++        <div class="space-y-4">
++            <flux:heading size="lg">Команды, участвовавшие в игре</flux:heading>
++
++            <flux:table>
++                <flux:table.columns>
++                    <flux:table.column>Команда</flux:table.column>
++                    <flux:table.column>Капитан</flux:table.column>
++                    <flux:table.column>Название на момент игры</flux:table.column>
++                    <flux:table.column>Игроков</flux:table.column>
++                    <flux:table.column>Выручка</flux:table.column>
++                </flux:table.columns>
++
++                <flux:table.rows>
++                    @forelse ($this->teamsForOpenGame as $participation)
++                        <flux:table.row wire:key="participation-{{ $participation->id }}">
++                            <flux:table.cell>
++                                {{ $participation->team?->current_name ?? '— команда удалена —' }}
++                            </flux:table.cell>
++                            <flux:table.cell>
++                                <flux:text size="sm" variant="subtle">{{ $participation->team?->captain_name ?? '—' }}</flux:text>
++                            </flux:table.cell>
++                            <flux:table.cell>
++                                <flux:text size="sm" variant="subtle">{{ $participation->team_name_at_time }}</flux:text>
++                            </flux:table.cell>
++                            <flux:table.cell>{{ $participation->players_count }}</flux:table.cell>
++                            <flux:table.cell>{{ number_format($participation->revenue, 0, ',', ' ') }} ₽</flux:table.cell>
++                        </flux:table.row>
++                    @empty
++                        <flux:table.row>
++                            <flux:table.cell colspan="5">
++                                <flux:text variant="subtle">Для этой игры пока нет зарегистрированных команд.</flux:text>
++                            </flux:table.cell>
++                        </flux:table.row>
++                    @endforelse
++                </flux:table.rows>
++            </flux:table>
++
++            <div class="flex justify-end">
++                <flux:modal.close>
++                    <flux:button variant="filled">Закрыть</flux:button>
++                </flux:modal.close>
++            </div>
++        </div>
++    </flux:modal>
+ </div>
+diff --git a/resources/views/livewire/admin/players-crud.blade.php b/resources/views/livewire/admin/players-crud.blade.php
+index e3b400b..05a3e7f 100644
+--- a/resources/views/livewire/admin/players-crud.blade.php
++++ b/resources/views/livewire/admin/players-crud.blade.php
+@@ -18,6 +18,7 @@ class="sm:w-1/2"
+             <flux:table.column>Имя</flux:table.column>
+             <flux:table.column>Телефон</flux:table.column>
+             <flux:table.column>Команд</flux:table.column>
++            <flux:table.column>Последняя игра</flux:table.column>
+             <flux:table.column></flux:table.column>
+         </flux:table.columns>
+ 
+@@ -25,8 +26,28 @@ class="sm:w-1/2"
+             @forelse ($this->players as $player)
+                 <flux:table.row wire:key="player-{{ $player->id }}">
+                     <flux:table.cell>{{ $player->name ?? '—' }}</flux:table.cell>
+-                    <flux:table.cell>{{ $player->phone ?? '—' }}</flux:table.cell>
++                    <flux:table.cell>
++                        @if ($player->phone)
++                            <div class="flex items-center gap-2" x-data="{ copied: false }">
++                                <span>{{ $player->phone }}</span>
++                                <button
++                                    type="button"
++                                    title="Скопировать номер"
++                                    x-on:click="navigator.clipboard.writeText('{{ $player->phone }}'); copied = true; setTimeout(() => copied = false, 1500)"
++                                    class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
++                                >
++                                    <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
++                                    <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
++                                </button>
++                            </div>
++                        @else
++                            —
++                        @endif
++                    </flux:table.cell>
+                     <flux:table.cell>{{ $player->teams_count }}</flux:table.cell>
++                    <flux:table.cell>
++                        {{ $player->last_game_at ? $player->last_game_at->format('d.m.Y') : '—' }}
++                    </flux:table.cell>
+                     <flux:table.cell>
+                         <div class="flex gap-2 justify-end">
+                             <flux:button size="sm" variant="ghost" wire:click="edit({{ $player->id }})">
+@@ -45,7 +66,7 @@ class="sm:w-1/2"
+                 </flux:table.row>
+             @empty
+                 <flux:table.row>
+-                    <flux:table.cell colspan="4">
++                    <flux:table.cell colspan="5">
+                         <flux:text variant="subtle">Игроки не найдены.</flux:text>
+                     </flux:table.cell>
+                 </flux:table.row>
+diff --git a/resources/views/livewire/admin/teams-crud.blade.php b/resources/views/livewire/admin/teams-crud.blade.php
+index 5c043db..6c70cbf 100644
+--- a/resources/views/livewire/admin/teams-crud.blade.php
++++ b/resources/views/livewire/admin/teams-crud.blade.php
+@@ -34,6 +34,7 @@ class="sm:w-1/2"
+             <flux:table.column>Команда</flux:table.column>
+             <flux:table.column>Телефон</flux:table.column>
+             <flux:table.column>Игр</flux:table.column>
++            <flux:table.column>Последняя игра</flux:table.column>
+             <flux:table.column>Стадия</flux:table.column>
+             <flux:table.column>Активность</flux:table.column>
+             <flux:table.column>Выручка</flux:table.column>
+@@ -49,8 +50,24 @@ class="sm:w-1/2"
+                             <flux:text size="sm" variant="subtle">{{ $team->captain_name }}</flux:text>
+                         @endif
+                     </flux:table.cell>
+-                    <flux:table.cell>{{ $team->phone }}</flux:table.cell>
++                    <flux:table.cell>
++                        <div class="flex items-center gap-2" x-data="{ copied: false }">
++                            <span>{{ $team->phone }}</span>
++                            <button
++                                type="button"
++                                title="Скопировать номер"
++                                x-on:click="navigator.clipboard.writeText('{{ $team->phone }}'); copied = true; setTimeout(() => copied = false, 1500)"
++                                class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
++                            >
++                                <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
++                                <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
++                            </button>
++                        </div>
++                    </flux:table.cell>
+                     <flux:table.cell>{{ $team->games_count }}</flux:table.cell>
++                    <flux:table.cell>
++                        {{ $team->last_game_at ? $team->last_game_at->format('d.m.Y') : '—' }}
++                    </flux:table.cell>
+                     <flux:table.cell>
+                         <flux:badge color="{{ $this->lifecycleColor($team->lifecycle_stage) }}" size="sm">
+                             {{ $team->lifecycle_stage ?? 'не рассчитано' }}
+@@ -64,6 +81,9 @@ class="sm:w-1/2"
+                     <flux:table.cell>{{ number_format($team->total_revenue, 0, ',', ' ') }} ₽</flux:table.cell>
+                     <flux:table.cell>
+                         <div class="flex gap-2 justify-end">
++                            <flux:button size="sm" variant="ghost" wire:click="viewHistory({{ $team->id }})">
++                                История
++                            </flux:button>
+                             <flux:button size="sm" variant="ghost" wire:click="edit({{ $team->id }})">
+                                 Изменить
+                             </flux:button>
+@@ -80,7 +100,7 @@ class="sm:w-1/2"
+                 </flux:table.row>
+             @empty
+                 <flux:table.row>
+-                    <flux:table.cell colspan="7">
++                    <flux:table.cell colspan="8">
+                         <flux:text variant="subtle">Команды не найдены.</flux:text>
+                     </flux:table.cell>
+                 </flux:table.row>
+@@ -118,4 +138,38 @@ class="sm:w-1/2"
+             </div>
+         </div>
+     </flux:modal>
++
++    <flux:modal name="team-history" class="max-w-2xl">
++        <div class="space-y-4">
++            <flux:heading size="lg">История коммуникаций</flux:heading>
++
++            <div class="space-y-3 max-h-96 overflow-y-auto">
++                @forelse ($this->historyForOpenTeam as $comm)
++                    <flux:card class="space-y-1">
++                        <div class="flex items-center justify-between">
++                            <flux:text size="sm" variant="subtle">
++                                {{ $comm->sent_at->format('d.m.Y H:i') }} · {{ strtoupper($comm->channel ?? '—') }}
++                            </flux:text>
++                            <flux:badge
++                                size="sm"
++                                color="{{ $comm->status === 'отправлено' ? 'green' : ($comm->status === 'ошибка' ? 'red' : 'zinc') }}"
++                            >
++                                {{ $comm->status }}
++                            </flux:badge>
++                        </div>
++                        <flux:badge color="blue" size="sm">{{ $comm->goal }}</flux:badge>
++                        <flux:text size="sm">{{ $comm->message_text }}</flux:text>
++                    </flux:card>
++                @empty
++                    <flux:text variant="subtle">По этой команде пока не было коммуникаций.</flux:text>
++                @endforelse
++            </div>
++
++            <div class="flex justify-end">
++                <flux:modal.close>
++                    <flux:button variant="filled">Закрыть</flux:button>
++                </flux:modal.close>
++            </div>
++        </div>
++    </flux:modal>
+ </div>
+diff --git a/resources/views/livewire/admin/weekly-reports.blade.php b/resources/views/livewire/admin/weekly-reports.blade.php
+new file mode 100644
+index 0000000..3579d83
+--- /dev/null
++++ b/resources/views/livewire/admin/weekly-reports.blade.php
+@@ -0,0 +1,62 @@
++<div class="flex flex-col gap-4">
++    <div class="flex items-center justify-between">
++        <flux:heading size="xl">Еженедельные отчёты</flux:heading>
++        <flux:button
++            wire:click="generatePreviousWeek"
++            variant="primary"
++            icon="document-plus"
++            wire:confirm="Сформировать отчёт за прошлую календарную неделю?"
++        >
++            Сформировать за прошлую неделю
++        </flux:button>
++    </div>
++
++    <flux:text variant="subtle">
++        Отчёт формируется автоматически каждый понедельник в 05:00 за предыдущую неделю.
++        Здесь можно посмотреть историю или сформировать отчёт вручную.
++    </flux:text>
++
++    <flux:table>
++        <flux:table.columns>
++            <flux:table.column>Период</flux:table.column>
++            <flux:table.column>Выручка</flux:table.column>
++            <flux:table.column>Прибыль</flux:table.column>
++            <flux:table.column>Ср. чек</flux:table.column>
++            <flux:table.column>Ср. размер команды</flux:table.column>
++            <flux:table.column>Новые</flux:table.column>
++            <flux:table.column>Повторные</flux:table.column>
++            <flux:table.column>Потерянные</flux:table.column>
++            <flux:table.column>Реактивированные</flux:table.column>
++            <flux:table.column>SMS отправлено</flux:table.column>
++            <flux:table.column>Конверсия SMS</flux:table.column>
++        </flux:table.columns>
++
++        <flux:table.rows>
++            @forelse ($this->reports as $report)
++                <flux:table.row wire:key="report-{{ $report->id }}">
++                    <flux:table.cell>
++                        {{ $report->period_start->format('d.m') }} — {{ $report->period_end->format('d.m.Y') }}
++                    </flux:table.cell>
++                    <flux:table.cell>{{ number_format($report->revenue, 0, ',', ' ') }} ₽</flux:table.cell>
++                    <flux:table.cell>{{ number_format($report->profit, 0, ',', ' ') }} ₽</flux:table.cell>
++                    <flux:table.cell>{{ $report->avg_check !== null ? number_format($report->avg_check, 0, ',', ' ').' ₽' : '—' }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->avg_team_size ?? '—' }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->new_teams_count }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->returning_teams_count }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->lost_teams_count }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->reactivated_teams_count }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->sms_sent_count }}</flux:table.cell>
++                    <flux:table.cell>{{ $report->sms_conversion_count }}</flux:table.cell>
++                </flux:table.row>
++            @empty
++                <flux:table.row>
++                    <flux:table.cell colspan="11">
++                        <flux:text variant="subtle">Отчётов пока нет.</flux:text>
++                    </flux:table.cell>
++                </flux:table.row>
++            @endforelse
++        </flux:table.rows>
++    </flux:table>
++
++    {{ $this->reports->links() }}
++</div>
+diff --git a/routes/console.php b/routes/console.php
+index 6638823..a7271cd 100644
+--- a/routes/console.php
++++ b/routes/console.php
+@@ -11,3 +11,13 @@
+ // Модуль 3/5: ежедневный пересчёт агрегатов и Marketing Profile команд
+ Schedule::command('teams:recalculate-profiles')->dailyAt('03:00');
+ 
++// Модуль 4: ежедневный пересчёт games_count у игроков
++Schedule::command('players:recalculate-stats')->dailyAt('03:15');
++
++// Модуль 6: ежедневно создаёт черновики предложений контакта — руководитель подтверждает
++// отправку вручную на странице «Черновики рассылок» (запускается после пересчёта профилей).
++Schedule::command('marketing:run-engine')->dailyAt('04:00');
++
++// Модуль 8: еженедельный отчёт за прошлую неделю (без AI-выводов)
++Schedule::command('reports:generate-weekly')->weeklyOn(1, '05:00');
++
+diff --git a/routes/web.php b/routes/web.php
+index df62639..d91a7ff 100644
+--- a/routes/web.php
++++ b/routes/web.php
+@@ -42,4 +42,22 @@
+     ->middleware(['auth'])
+     ->name('admin.players');
+ 
++use App\Livewire\Admin\DataImport;
++
++Route::get('/admin/import', DataImport::class)
++    ->middleware(['auth'])
++    ->name('admin.import');
++
++use App\Livewire\Admin\CommunicationDrafts;
++
++Route::get('/admin/drafts', CommunicationDrafts::class)
++    ->middleware(['auth'])
++    ->name('admin.drafts');
++
++use App\Livewire\Admin\WeeklyReports;
++
++Route::get('/admin/reports', WeeklyReports::class)
++    ->middleware(['auth'])
++    ->name('admin.reports');
++
+ require __DIR__.'/settings.php';

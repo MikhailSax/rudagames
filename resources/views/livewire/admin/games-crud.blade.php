@@ -67,6 +67,9 @@
                     </flux:table.cell>
                     <flux:table.cell>
                         <div class="flex gap-2 justify-end">
+                            <flux:button size="sm" variant="ghost" wire:click="viewTeams({{ $game->id }})">
+                                Команды
+                            </flux:button>
                             <flux:button size="sm" variant="ghost" wire:click="openFinance({{ $game->id }})">
                                 Финансы
                             </flux:button>
@@ -149,6 +152,48 @@
                     <flux:button variant="filled">Отмена</flux:button>
                 </flux:modal.close>
                 <flux:button wire:click="saveFinance" variant="primary">Сохранить</flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    <flux:modal name="teams-for-game" class="max-w-2xl">
+        <div class="space-y-4">
+            <flux:heading size="lg">Команды, участвовавшие в игре</flux:heading>
+
+            <flux:table>
+                <flux:table.columns>
+                    <flux:table.column>Команда</flux:table.column>
+                    <flux:table.column>Название на момент игры</flux:table.column>
+                    <flux:table.column>Игроков</flux:table.column>
+                    <flux:table.column>Выручка</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @forelse ($this->teamsForOpenGame as $participation)
+                        <flux:table.row wire:key="participation-{{ $participation->id }}">
+                            <flux:table.cell>
+                                {{ $participation->team?->current_name ?? '— команда удалена —' }}
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                <flux:text size="sm" variant="subtle">{{ $participation->team_name_at_time }}</flux:text>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $participation->players_count }}</flux:table.cell>
+                            <flux:table.cell>{{ number_format($participation->revenue, 0, ',', ' ') }} ₽</flux:table.cell>
+                        </flux:table.row>
+                    @empty
+                        <flux:table.row>
+                            <flux:table.cell colspan="4">
+                                <flux:text variant="subtle">Для этой игры пока нет зарегистрированных команд.</flux:text>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforelse
+                </flux:table.rows>
+            </flux:table>
+
+            <div class="flex justify-end">
+                <flux:modal.close>
+                    <flux:button variant="filled">Закрыть</flux:button>
+                </flux:modal.close>
             </div>
         </div>
     </flux:modal>

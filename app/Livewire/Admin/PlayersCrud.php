@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Admin;
 
+use App\Models\Game;
 use App\Models\Player;
 use App\Models\Team;
 use Livewire\Attributes\Computed;
@@ -31,6 +32,14 @@ class PlayersCrud extends Component
     {
         return Player::query()
             ->withCount('teams')
+            ->addSelect([
+                'last_game_at' => Game::query()
+                    ->selectRaw('MAX(games.played_at)')
+                    ->join('game_participations', 'game_participations.game_id', '=', 'games.id')
+                    ->join('team_player', 'team_player.team_id', '=', 'game_participations.team_id')
+                    ->whereColumn('team_player.player_id', 'players.id'),
+            ])
+            ->withCasts(['last_game_at' => 'datetime'])
             ->when($this->search !== '', function ($q) {
                 $q->where(function ($q2) {
                     $q2->where('name', 'like', "%{$this->search}%")
