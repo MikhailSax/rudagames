@@ -16,15 +16,21 @@ use Livewire\Component;
 class BulkOutreach extends Component
 {
     public string $lifecycleFilter = '';
+
     public string $activityFilter = '';
+
     public ?int $favoriteProductFilter = null;
 
     public string $channel = 'sms';
+
     public string $messageText = '';
+
     public string $goalLabel = 'ручная рассылка';
 
     public bool $sent = false;
+
     public int $sentCount = 0;
+
     public int $skippedCount = 0;
 
     #[Computed]
@@ -45,12 +51,18 @@ class BulkOutreach extends Component
         return $this->baseQuery()->count();
     }
 
+    #[Computed]
+    public function segmentTelegramLinkedCount(): int
+    {
+        return $this->baseQuery()->whereNotNull('telegram_chat_id')->count();
+    }
+
     private function baseQuery()
     {
         return Team::query()
-            ->when($this->lifecycleFilter !== '', fn($q) => $q->where('lifecycle_stage', $this->lifecycleFilter))
-            ->when($this->activityFilter !== '', fn($q) => $q->where('activity_status', $this->activityFilter))
-            ->when($this->favoriteProductFilter, fn($q) => $q->where('favorite_product_id', $this->favoriteProductFilter));
+            ->when($this->lifecycleFilter !== '', fn ($q) => $q->where('lifecycle_stage', $this->lifecycleFilter))
+            ->when($this->activityFilter !== '', fn ($q) => $q->where('activity_status', $this->activityFilter))
+            ->when($this->favoriteProductFilter, fn ($q) => $q->where('favorite_product_id', $this->favoriteProductFilter));
     }
 
     public function send(SmsSenderInterface $sms, MessengerSenderInterface $messenger): void
@@ -66,13 +78,15 @@ class BulkOutreach extends Component
         $skippedCount = 0;
 
         foreach ($teams as $team) {
-            if ($this->channel === 'email' && !$team->email) {
+            if ($this->channel === 'email' && ! $team->email) {
                 $skippedCount++;
+
                 continue;
             }
 
-            if ($this->channel === 'messenger' && !$team->phone) {
+            if ($this->channel === 'messenger' && ! $team->isTelegramLinked()) {
                 $skippedCount++;
+
                 continue;
             }
 

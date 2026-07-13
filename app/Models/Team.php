@@ -17,6 +17,9 @@ class Team extends Model
         'current_name',
         'captain_name',
         'email',
+        'telegram_chat_id',
+        'telegram_link_token',
+        'telegram_linked_at',
         'first_game_at',
         'last_game_at',
         'games_count',
@@ -32,6 +35,7 @@ class Team extends Model
     protected $casts = [
         'first_game_at' => 'datetime',
         'last_game_at' => 'datetime',
+        'telegram_linked_at' => 'datetime',
         'total_revenue' => 'decimal:2',
         'avg_team_size' => 'decimal:2',
         'ltv' => 'decimal:2',
@@ -74,5 +78,35 @@ class Team extends Model
     public function setPhoneAttribute(string $value): void
     {
         $this->attributes['phone'] = preg_replace('/\D/', '', $value);
+    }
+
+    /**
+     * Персональная ссылка команды на Telegram-бота. При первом обращении генерирует
+     * токен — по нему вебхук бота свяжет chat_id с этой командой (Модуль 6: Telegram).
+     */
+    public function telegramLinkToken(): string
+    {
+        if (! $this->telegram_link_token) {
+            $this->telegram_link_token = bin2hex(random_bytes(16));
+            $this->save();
+        }
+
+        return $this->telegram_link_token;
+    }
+
+    public function telegramInviteUrl(): ?string
+    {
+        $botUsername = config('services.telegram.bot_username');
+
+        if (! $botUsername) {
+            return null;
+        }
+
+        return "https://t.me/{$botUsername}?start=".$this->telegramLinkToken();
+    }
+
+    public function isTelegramLinked(): bool
+    {
+        return ! empty($this->telegram_chat_id);
     }
 }

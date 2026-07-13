@@ -1,11 +1,15 @@
 <?php
 
+use App\Livewire\Admin\AnalyticsDashboard;
 use App\Livewire\Admin\ProductsCrud;
 use App\Livewire\Admin\TeamsCrud;
-use App\Livewire\Admin\AnalyticsDashboard;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+
+use App\Http\Controllers\TelegramWebhookController;
+
+Route::post('/telegram/webhook', TelegramWebhookController::class)->name('telegram.webhook');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
@@ -14,7 +18,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
 Route::get('/admin/teams', TeamsCrud::class)
     ->middleware('auth')
     ->name('admin.teams');
-
 
 Route::get('/admin/analytics', AnalyticsDashboard::class)
     ->middleware(['auth'])
@@ -36,6 +39,12 @@ Route::get('/admin/games', GamesCrud::class)
     ->middleware(['auth'])
     ->name('admin.games');
 
+use App\Livewire\Admin\GameShow;
+
+Route::get('/admin/games/{game}', GameShow::class)
+    ->middleware(['auth'])
+    ->name('admin.games.show');
+
 use App\Livewire\Admin\PlayersCrud;
 
 Route::get('/admin/players', PlayersCrud::class)
@@ -47,5 +56,17 @@ use App\Livewire\Admin\DataImport;
 Route::get('/admin/import', DataImport::class)
     ->middleware(['auth'])
     ->name('admin.import');
+
+use App\Livewire\Admin\CommunicationDrafts;
+
+Route::get('/admin/drafts', CommunicationDrafts::class)
+    ->middleware(['auth'])
+    ->name('admin.drafts');
+
+use App\Livewire\Admin\WeeklyReports;
+
+Route::get('/admin/reports', WeeklyReports::class)
+    ->middleware(['auth'])
+    ->name('admin.reports');
 
 require __DIR__.'/settings.php';

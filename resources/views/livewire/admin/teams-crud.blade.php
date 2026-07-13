@@ -62,6 +62,9 @@
                                 <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
                                 <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
                             </button>
+                            @if ($team->isTelegramLinked())
+                                <flux:icon name="paper-airplane" class="w-3.5 h-3.5 text-blue-500" title="Telegram подключён" />
+                            @endif
                         </div>
                     </flux:table.cell>
                     <flux:table.cell>{{ $team->games_count }}</flux:table.cell>
@@ -81,6 +84,12 @@
                     <flux:table.cell>{{ number_format($team->total_revenue, 0, ',', ' ') }} ₽</flux:table.cell>
                     <flux:table.cell>
                         <div class="flex gap-2 justify-end">
+                            <flux:button size="sm" variant="ghost" wire:click="openTelegram({{ $team->id }})">
+                                Telegram
+                            </flux:button>
+                            <flux:button size="sm" variant="ghost" wire:click="viewHistory({{ $team->id }})">
+                                История
+                            </flux:button>
                             <flux:button size="sm" variant="ghost" wire:click="edit({{ $team->id }})">
                                 Изменить
                             </flux:button>
@@ -134,5 +143,97 @@
                 <flux:button wire:click="save" variant="primary">Сохранить</flux:button>
             </div>
         </div>
+    </flux:modal>
+
+    <flux:modal name="team-history" class="max-w-2xl">
+        <div class="space-y-4">
+            <flux:heading size="lg">История коммуникаций</flux:heading>
+
+            <div class="space-y-3 max-h-96 overflow-y-auto">
+                @forelse ($this->historyForOpenTeam as $comm)
+                    <flux:card class="space-y-1">
+                        <div class="flex items-center justify-between">
+                            <flux:text size="sm" variant="subtle">
+                                {{ $comm->sent_at->format('d.m.Y H:i') }} · {{ strtoupper($comm->channel ?? '—') }}
+                            </flux:text>
+                            <flux:badge
+                                size="sm"
+                                color="{{ $comm->status === 'отправлено' ? 'green' : ($comm->status === 'ошибка' ? 'red' : 'zinc') }}"
+                            >
+                                {{ $comm->status }}
+                            </flux:badge>
+                        </div>
+                        <flux:badge color="blue" size="sm">{{ $comm->goal }}</flux:badge>
+                        <flux:text size="sm">{{ $comm->message_text }}</flux:text>
+                    </flux:card>
+                @empty
+                    <flux:text variant="subtle">По этой команде пока не было коммуникаций.</flux:text>
+                @endforelse
+            </div>
+
+            <div class="flex justify-end">
+                <flux:modal.close>
+                    <flux:button variant="filled">Закрыть</flux:button>
+                </flux:modal.close>
+            </div>
+        </div>
+    </flux:modal>
+
+    <flux:modal name="team-telegram" class="max-w-md">
+        @if ($this->telegramTeamForModal)
+            <div class="space-y-6">
+                <flux:heading size="lg">Telegram — {{ $this->telegramTeamForModal->current_name }}</flux:heading>
+
+                @if ($this->telegramTeamForModal->isTelegramLinked())
+                    <flux:callout variant="success" icon="check-circle">
+                        <flux:callout.heading>Подключён</flux:callout.heading>
+                        <flux:callout.text>
+                            С {{ $this->telegramTeamForModal->telegram_linked_at?->format('d.m.Y') }}.
+                            Команде можно писать в разделах «Черновики рассылок» и «Массовая рассылка».
+                        </flux:callout.text>
+                    </flux:callout>
+
+                    <div class="flex justify-end">
+                        <flux:button
+                            variant="ghost"
+                            wire:click="unlinkTelegram"
+                            wire:confirm="Отвязать Telegram у этой команды? Чтобы снова получать сообщения, им нужно будет заново перейти по ссылке."
+                        >
+                            Отвязать
+                        </flux:button>
+                    </div>
+                @elseif ($this->telegramTeamForModal->telegramInviteUrl())
+                    <flux:text variant="subtle">
+                        Отправьте эту ссылку капитану команды (например, вместе с SMS). Как только он перейдёт
+                        по ней и нажмёт Start в Telegram, команда появится доступной для рассылок.
+                    </flux:text>
+
+                    <div class="flex items-center gap-2" x-data="{ copied: false }">
+                        <flux:input readonly value="{{ $this->telegramTeamForModal->telegramInviteUrl() }}" class="flex-1" />
+                        <flux:button
+                            variant="ghost"
+                            icon="clipboard"
+                            x-on:click="navigator.clipboard.writeText('{{ $this->telegramTeamForModal->telegramInviteUrl() }}'); copied = true; setTimeout(() => copied = false, 1500)"
+                        >
+                            <span x-show="!copied">Копировать</span>
+                            <span x-show="copied" x-cloak>Скопировано</span>
+                        </flux:button>
+                    </div>
+                @else
+                    <flux:callout variant="warning" icon="exclamation-triangle">
+                        <flux:callout.text>
+                            Telegram-бот ещё не настроен (нет TELEGRAM_BOT_USERNAME в конфигурации).
+                            Обратитесь к разработчику.
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                <div class="flex justify-end">
+                    <flux:modal.close>
+                        <flux:button variant="filled">Закрыть</flux:button>
+                    </flux:modal.close>
+                </div>
+            </div>
+        @endif
     </flux:modal>
 </div>

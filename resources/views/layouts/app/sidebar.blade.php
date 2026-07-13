@@ -14,11 +14,19 @@
                 {{ __('Аналитика') }}
             </flux:sidebar.item>
 
+            <flux:sidebar.item icon="document-chart-bar" :href="route('admin.reports')" :current="request()->routeIs('admin.reports')" wire:navigate>
+                {{ __('Еженедельные отчёты') }}
+            </flux:sidebar.item>
+
             <flux:sidebar.item icon="users" :href="route('admin.teams')" :current="request()->routeIs('admin.teams')" wire:navigate>
                 {{ __('Команды') }}
             </flux:sidebar.item>
             <flux:sidebar.item icon="megaphone" :href="route('admin.outreach')" :current="request()->routeIs('admin.outreach')" wire:navigate>
                 {{ __('Рассылка') }}
+            </flux:sidebar.item>
+
+            <flux:sidebar.item icon="inbox-stack" :href="route('admin.drafts')" :current="request()->routeIs('admin.drafts')" wire:navigate>
+                {{ __('Черновики рассылок') }}
             </flux:sidebar.item>
 
             <flux:sidebar.item icon="squares-2x2" :href="route('admin.products')" :current="request()->routeIs('admin.products')" wire:navigate>

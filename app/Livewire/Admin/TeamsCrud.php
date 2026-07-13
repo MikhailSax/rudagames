@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Admin;
 
+use App\Models\Communication;
 use App\Models\Product;
 use App\Models\Team;
 use Livewire\Attributes\Computed;
@@ -17,16 +18,28 @@ class TeamsCrud extends Component
     protected $paginationTheme = 'tailwind';
 
     public string $search = '';
+
     public string $lifecycleFilter = '';
+
     public string $activityFilter = '';
 
     public ?int $editingId = null;
 
     public string $current_name = '';
+
     public string $captain_name = '';
+
     public string $phone = '';
+
     public string $email = '';
+
     public ?int $favorite_product_id = null;
+
+    // --- История коммуникаций (Модуль 7) ---
+    public ?int $historyTeamId = null;
+
+    // --- Подключение Telegram ---
+    public ?int $telegramTeamId = null;
 
     #[Computed]
     public function teams()
@@ -39,8 +52,8 @@ class TeamsCrud extends Component
                         ->orWhere('captain_name', 'like', "%{$this->search}%");
                 });
             })
-            ->when($this->lifecycleFilter !== '', fn($q) => $q->where('lifecycle_stage', $this->lifecycleFilter))
-            ->when($this->activityFilter !== '', fn($q) => $q->where('activity_status', $this->activityFilter))
+            ->when($this->lifecycleFilter !== '', fn ($q) => $q->where('lifecycle_stage', $this->lifecycleFilter))
+            ->when($this->activityFilter !== '', fn ($q) => $q->where('activity_status', $this->activityFilter))
             ->orderByDesc('last_game_at')
             ->paginate(20);
     }
@@ -49,6 +62,25 @@ class TeamsCrud extends Component
     public function products()
     {
         return Product::orderBy('name')->get();
+    }
+
+    #[Computed]
+    public function historyForOpenTeam()
+    {
+        if (! $this->historyTeamId) {
+            return collect();
+        }
+
+        return Communication::where('team_id', $this->historyTeamId)
+            ->whereNotNull('sent_at')
+            ->orderByDesc('sent_at')
+            ->get();
+    }
+
+    #[Computed]
+    public function telegramTeamForModal(): ?Team
+    {
+        return $this->telegramTeamId ? Team::find($this->telegramTeamId) : null;
     }
 
     public function lifecycleColor(?string $stage): string
@@ -126,6 +158,7 @@ class TeamsCrud extends Component
         }
         if ($phoneExistsQuery->exists()) {
             $this->addError('phone', 'Команда с таким телефоном уже существует.');
+
             return;
         }
 
@@ -150,6 +183,32 @@ class TeamsCrud extends Component
     public function delete(int $id): void
     {
         Team::findOrFail($id)->delete();
+    }
+
+    // --- История коммуникаций (Модуль 7) ---
+
+    public function viewHistory(int $id): void
+    {
+        $this->historyTeamId = $id;
+        $this->modal('team-history')->show();
+    }
+
+    // --- Подключение Telegram ---
+
+    public function openTelegram(int $id): void
+    {
+        $this->telegramTeamId = $id;
+        $this->modal('team-telegram')->show();
+    }
+
+    public function unlinkTelegram(): void
+    {
+        Team::whereKey($this->telegramTeamId)->update([
+            'telegram_chat_id' => null,
+            'telegram_linked_at' => null,
+        ]);
+
+        unset($this->telegramTeamForModal);
     }
 
     public function closeModal(): void

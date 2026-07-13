@@ -4,7 +4,6 @@ namespace App\Livewire\Admin;
 
 use App\Models\Game;
 use App\Models\GameCategory;
-use App\Models\GameParticipation;
 use App\Models\Product;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
@@ -38,15 +37,13 @@ class GamesCrud extends Component
     public string $actual_revenue = '';
     public string $actual_expenses = '';
 
-    // --- Список команд, участвовавших в игре ---
-    public ?int $teamsGameId = null;
-
     #[Computed]
     public function games()
     {
         return Game::query()
             ->with(['product', 'category'])
             ->withCount('participations')
+            ->withAvg('participations', 'players_count')
             ->when($this->search !== '', fn ($q) => $q->where('name', 'like', "%{$this->search}%"))
             ->when($this->productFilter, fn ($q) => $q->where('product_id', $this->productFilter))
             ->when($this->timeFilter === 'upcoming', fn ($q) => $q->where('played_at', '>', now()))
@@ -59,19 +56,6 @@ class GamesCrud extends Component
     public function products()
     {
         return Product::orderBy('name')->get();
-    }
-
-    #[Computed]
-    public function teamsForOpenGame()
-    {
-        if (! $this->teamsGameId) {
-            return collect();
-        }
-
-        return GameParticipation::with('team')
-            ->where('game_id', $this->teamsGameId)
-            ->orderByDesc('revenue')
-            ->get();
     }
 
     #[Computed]
@@ -162,14 +146,6 @@ class GamesCrud extends Component
     public function delete(int $id): void
     {
         Game::findOrFail($id)->delete();
-    }
-
-    // --- Просмотр команд, участвовавших в игре ---
-
-    public function viewTeams(int $id): void
-    {
-        $this->teamsGameId = $id;
-        $this->modal('teams-for-game')->show();
     }
 
     // --- Модуль 2: ручной ввод финансов после игры ---

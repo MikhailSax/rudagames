@@ -53,12 +53,13 @@
         <flux:select wire:model="channel" label="Канал отправки">
             <flux:select.option value="sms">SMS</flux:select.option>
             <flux:select.option value="email">Email (команды без email будут пропущены)</flux:select.option>
-            <flux:select.option value="messenger">Мессенджер — WhatsApp/Telegram (команды без телефона будут пропущены)</flux:select.option>
+            <flux:select.option value="messenger">Telegram (команды без привязанного Telegram будут пропущены)</flux:select.option>
         </flux:select>
         @if ($channel === 'messenger')
-            <flux:callout variant="warning" icon="exclamation-triangle">
+            <flux:callout variant="secondary" icon="paper-airplane">
                 <flux:callout.text>
-                    Реальный провайдер мессенджера ещё не подключён — сообщения пока только логируются (заглушка), как и раньше было с SMS.
+                    Из {{ $this->segmentCount }} команд в сегменте Telegram подключён у {{ $this->segmentTelegramLinkedCount }}.
+                    Остальным нужно сначала перейти по персональной ссылке (страница команды → «Подключить Telegram»).
                 </flux:callout.text>
             </flux:callout>
         @endif

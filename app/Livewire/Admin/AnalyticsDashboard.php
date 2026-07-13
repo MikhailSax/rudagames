@@ -4,6 +4,7 @@ namespace App\Livewire\Admin;
 
 use App\Models\Communication;
 use App\Models\GameParticipation;
+use App\Models\MonthlyGoal;
 use App\Models\Team;
 use Carbon\CarbonInterface;
 use Livewire\Attributes\Computed;
@@ -13,6 +14,8 @@ use Livewire\Component;
 #[Layout('layouts.app')]
 class AnalyticsDashboard extends Component
 {
+    public string $goalInput = '';
+
     private function periodStart(): ?CarbonInterface
     {
         return now()->subDays(30);
@@ -46,6 +49,105 @@ class AnalyticsDashboard extends Component
         ];
     }
 
+    /**
+     * Модуль 9: показатели «сегодня» и «на этой неделе» — то, что руководитель видит
+     * при открытии CRM с утра.
+     */
+    #[Computed]
+    public function todayKpis(): array
+    {
+        $today = now();
+        $weekStart = now()->startOfWeek();
+        $weekEnd = now()->endOfWeek();
+
+        $newRegistrationsToday = GameParticipation::whereDate('created_at', $today)->count();
+
+        $teamsThisWeek = GameParticipation::query()
+            ->join('games', 'games.id', '=', 'game_participations.game_id')
+            ->whereBetween('games.played_at', [$weekStart, $weekEnd])
+            ->distinct('game_participations.team_id')
+            ->count('game_participations.team_id');
+
+        // Ожидаемая выручка: стоимость участия × число уже зарегистрированных команд
+        // по предстоящим играм на этой неделе.
+        $expectedRevenue = GameParticipation::query()
+            ->join('games', 'games.id', '=', 'game_participations.game_id')
+            ->whereBetween('games.played_at', [now(), $weekEnd])
+            ->selectRaw('COALESCE(SUM(games.cost), 0) as total')
+            ->value('total');
+
+        $smsToday = Communication::query()
+            ->where('channel', 'sms')
+            ->where('status', Communication::STATUS_SENT)
+            ->whereDate('sent_at', $today)
+            ->count();
+
+        return [
+            'new_registrations_today' => $newRegistrationsToday,
+            'teams_this_week' => $teamsThisWeek,
+            'expected_revenue' => (float) $expectedRevenue,
+            'need_to_return' => Communication::drafts()->where('goal', 'вернуть')->count(),
+            'sms_today' => $smsToday,
+        ];
+    }
+
+    /**
+     * Модуль 9: «Главные события» — опирается на черновики Marketing Engine (Модуль 6):
+     * каждая цель черновика уже отражает конкретное событие в жизни команды.
+     */
+    #[Computed]
+    public function mainEvents(): array
+    {
+        return [
+            'new_teams' => Team::where('first_game_at', '>=', now()->subDays(7))->count(),
+            'milestones_reached' => Communication::drafts()->where('goal', 'поздравить')->count(),
+            'need_contact' => Communication::drafts()->count(),
+            'need_second_game' => Communication::drafts()->where('goal', 'довести до второй игры')->count(),
+        ];
+    }
+
+    #[Computed]
+    public function currentMonthGoal(): ?MonthlyGoal
+    {
+        return MonthlyGoal::whereDate('month', now()->startOfMonth()->toDateString())->first();
+    }
+
+    #[Computed]
+    public function currentMonthRevenue(): float
+    {
+        return (float) GameParticipation::query()
+            ->join('games', 'games.id', '=', 'game_participations.game_id')
+            ->whereBetween('games.played_at', [now()->startOfMonth(), now()->endOfMonth()])
+            ->sum('game_participations.revenue');
+    }
+
+    #[Computed]
+    public function monthGoalProgressPercent(): ?float
+    {
+        $goal = $this->currentMonthGoal;
+
+        if (! $goal || (float) $goal->target_revenue <= 0) {
+            return null;
+        }
+
+        return round(min(100, $this->currentMonthRevenue / (float) $goal->target_revenue * 100), 1);
+    }
+
+    public function saveGoal(): void
+    {
+        $this->validate([
+            'goalInput' => 'required|numeric|min:1',
+        ]);
+
+        MonthlyGoal::updateOrCreate(
+            ['month' => now()->startOfMonth()->toDateString()],
+            ['target_revenue' => $this->goalInput]
+        );
+
+        $this->goalInput = '';
+        unset($this->currentMonthGoal, $this->monthGoalProgressPercent);
+    }
+
     #[Computed]
     public function lifecycleBreakdown(): array
     {
@@ -71,15 +173,16 @@ class AnalyticsDashboard extends Component
     #[Computed]
     public function revenueByMonth(): array
     {
-        $rows = GameParticipation::query()
+        // Группировка в PHP вместо SQL DATE_FORMAT — тот был завязан на MySQL
+        // и падал на sqlite (дефолт в .env.example этого проекта).
+        return GameParticipation::query()
             ->join('games', 'games.id', '=', 'game_participations.game_id')
             ->where('games.played_at', '<=', now())
-            ->selectRaw("DATE_FORMAT(games.played_at, '%Y-%m') as month, SUM(game_participations.revenue) as total")
-            ->groupBy('month')
-            ->orderBy('month')
-            ->get();
-
-        return $rows->pluck('total', 'month')->toArray();
+            ->get(['games.played_at', 'game_participations.revenue'])
+            ->groupBy(fn ($row) => \Carbon\Carbon::parse($row->played_at)->format('Y-m'))
+            ->map(fn ($rows) => (float) $rows->sum('revenue'))
+            ->sortKeys()
+            ->toArray();
     }
 
     #[Computed]
