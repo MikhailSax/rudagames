@@ -73,7 +73,7 @@ return [
     |
     */
 
-    'home' => '/dashboard',
+    'home' => '/admin/analytics',
 
     /*
     |--------------------------------------------------------------------------
@@ -161,7 +161,10 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Публичная регистрация отключена намеренно: это внутренняя CRM с данными
+        // клиентов (телефоны, выручка), а не публичный сервис. Аккаунты сотрудникам
+        // создаёт администратор через `php artisan staff:create`.
+        // Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

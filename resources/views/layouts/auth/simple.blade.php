@@ -6,11 +6,13 @@
     <body class="min-h-screen bg-white antialiased dark:bg-linear-to-b dark:from-neutral-950 dark:to-neutral-900">
         <div class="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
             <div class="flex w-full max-w-sm flex-col gap-2">
-                <a href="{{ route('home') }}" class="flex flex-col items-center gap-2 font-medium" wire:navigate>
-                    <span class="flex h-9 w-9 mb-1 items-center justify-center rounded-md">
-                        <x-app-logo-icon class="size-9 fill-current text-black dark:text-white" />
+                <a href="{{ route('home') }}" class="flex flex-col items-center gap-3 mb-2" wire:navigate>
+                    <span class="flex h-12 w-12 items-center justify-center rounded-xl bg-accent-content text-accent-foreground">
+                        <x-app-logo-icon class="size-7 fill-current text-white dark:text-black" />
                     </span>
-                    <span class="sr-only">{{ config('app.name', 'Laravel') }}</span>
+                    <span class="text-base font-medium text-zinc-900 dark:text-white">
+                        {{ config('app.name', 'Ruda Games') }}
+                    </span>
                 </a>
                 <div class="flex flex-col gap-6">
                     {{ $slot }}

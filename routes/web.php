@@ -5,15 +5,17 @@ use App\Livewire\Admin\ProductsCrud;
 use App\Livewire\Admin\TeamsCrud;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome')->name('home');
+// Внутренняя CRM — публичной страницы нет. Гость видит только логин,
+// сотрудник сразу попадает в аналитику (замена дефолтному /dashboard).
+Route::get('/', function () {
+    return auth()->check()
+        ? redirect()->route('admin.analytics')
+        : redirect()->route('login');
+})->name('home');
 
 use App\Http\Controllers\TelegramWebhookController;
 
 Route::post('/telegram/webhook', TelegramWebhookController::class)->name('telegram.webhook');
-
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::view('dashboard', 'dashboard')->name('dashboard');
-});
 
 Route::get('/admin/teams', TeamsCrud::class)
     ->middleware('auth')
