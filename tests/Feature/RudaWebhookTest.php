@@ -186,11 +186,28 @@ test('teamRegistered stores the application and links an existing team by phone'
     expect(RudaRegistration::count())->toBe(1);
 });
 
-test('teamRegistered does not create a team for an unknown phone', function () {
+test('teamRegistered creates a new team right away for an unknown phone', function () {
     rudaPost('teamRegistered', rudaRegistration(502, 'Новички', '+7 900 555-66-77'))->assertNoContent();
 
+    $team = Team::where('phone', '79005556677')->first();
+    expect($team)->not->toBeNull();
+    expect($team->current_name)->toBe('Новички');
+    expect($team->captain_name)->toBe('Иван');
+    expect($team->email)->toBe('ivan@example.com');
+    expect(RudaRegistration::first()->team_id)->toBe($team->id);
+});
+
+test('teamRegistered ignores placeholder phones and matches old teams stored with 8', function () {
+    rudaPost('teamRegistered', rudaRegistration(503, 'Тест', '+7(000)000-00-00'))->assertNoContent();
     expect(Team::count())->toBe(0);
     expect(RudaRegistration::first()->team_id)->toBeNull();
+
+    // Excel-импорт мог сохранить телефон с 8 в начале
+    $old = Team::create(['phone' => '89001112233', 'current_name' => 'Старожилы']);
+    rudaPost('teamRegistered', rudaRegistration(504, 'Старожилы', '+7 900 111-22-33'))->assertNoContent();
+
+    expect(Team::count())->toBe(1);
+    expect(RudaRegistration::where('play_application_id', 504)->first()->team_id)->toBe($old->id);
 });
 
 test('teamRegistered validates required fields', function () {

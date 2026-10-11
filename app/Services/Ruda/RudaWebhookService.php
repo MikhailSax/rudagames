@@ -96,9 +96,21 @@ class RudaWebhookService
             $phone = $this->normalizePhone($data['captainPhone'] ?? null)
                 ?? $this->normalizePhone($data['registrantPhone'] ?? null);
 
-            // Команду не создаём на этапе заявки — она может не прийти на игру.
-            // Существующую привязываем сразу, новая появится при получении статистики.
-            $team = $phone ? Team::where('phone', $phone)->first() : null;
+            // Команда появляется в CRM сразу при заявке: находим по телефону или создаём.
+            // У команды без участий нет статусов, поэтому рассылки её не трогают,
+            // пока она не сыграет.
+            $team = $phone ? $this->findTeamByPhone($phone) : null;
+            $teamCreated = false;
+
+            if (! $team && $phone) {
+                $team = Team::create([
+                    'phone' => $phone,
+                    'current_name' => $this->clean($data['teamName'] ?? null) ?? 'Без названия',
+                    'captain_name' => $this->clean($data['captainName'] ?? null) ?? $this->clean($data['registrantName'] ?? null),
+                    'email' => $this->clean($data['captainEmail'] ?? null) ?? $this->clean($data['registrantEmail'] ?? null),
+                ]);
+                $teamCreated = true;
+            }
 
             $registration = RudaRegistration::updateOrCreate(
                 ['play_application_id' => (int) $data['playApplicationId']],
@@ -120,6 +132,7 @@ class RudaWebhookService
                 'registration_id' => $registration->id,
                 'game_id' => $game->id,
                 'team_id' => $team?->id,
+                'team_created' => $teamCreated,
             ];
         });
     }
@@ -282,7 +295,7 @@ class RudaWebhookService
                 return null;
             }
 
-            $team = Team::firstOrNew(['phone' => $phone]);
+            $team = $this->findTeamByPhone($phone) ?? new Team(['phone' => $phone]);
 
             if (! $team->exists) {
                 $team->current_name = $teamName;
@@ -366,7 +379,20 @@ class RudaWebhookService
         throw new \InvalidArgumentException('Не передана дата мероприятия');
     }
 
-    /** Приводит телефон к формату teams.phone (11 цифр, начинается с 7) или null. */
+    /**
+     * Excel-импорт хранит телефон как есть (только цифры), поэтому старые команды
+     * могут лежать и с 7, и с 8 в начале — ищем оба варианта.
+     */
+    private function findTeamByPhone(string $phone): ?Team
+    {
+        return Team::where('phone', $phone)->first()
+            ?? Team::where('phone', '8'.substr($phone, 1))->first();
+    }
+
+    /**
+     * Приводит телефон к формату teams.phone (11 цифр, начинается с 7) или null.
+     * Заглушки вроде +7(000)000-00-00 отбрасываем: код после 7 не может начинаться с 0–2.
+     */
     private function normalizePhone(?string $phone): ?string
     {
         $digits = preg_replace('/\D/', '', (string) $phone);
@@ -377,7 +403,7 @@ class RudaWebhookService
             $digits = '7'.substr($digits, 1);
         }
 
-        return strlen($digits) === 11 ? $digits : null;
+        return preg_match('/^7[3-9]\d{9}$/', $digits) ? $digits : null;
     }
 
     private function clean(?string $value): ?string
