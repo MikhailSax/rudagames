@@ -14,8 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Telegram шлёт вебхуки без CSRF-токена — проверяем подлинность через
         // секретный заголовок X-Telegram-Bot-Api-Secret-Token в самом контроллере.
+        // То же для вебхуков Руды — секрет передаётся в пути URL.
         $middleware->validateCsrfTokens(except: [
             'telegram/webhook',
+            'ruda/webhook/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

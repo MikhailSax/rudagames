@@ -41,4 +41,12 @@ return [
         'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
     ],
 
+    // Вебхуки платформы Руда: базовый адрес для настроек партнера —
+    // {APP_URL}/ruda/webhook/{RUDA_WEBHOOK_SECRET}
+    'ruda' => [
+        'webhook_secret' => env('RUDA_WEBHOOK_SECRET'),
+        // Продукт для новых игр, название которых ещё не встречалось в CRM
+        'default_product' => env('RUDA_DEFAULT_PRODUCT', 'Мозгобойня'),
+    ],
+
 ];

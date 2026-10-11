@@ -17,6 +17,12 @@ use App\Http\Controllers\TelegramWebhookController;
 
 Route::post('/telegram/webhook', TelegramWebhookController::class)->name('telegram.webhook');
 
+use App\Http\Controllers\RudaWebhookController;
+
+Route::post('/ruda/webhook/{secret}/{event}', RudaWebhookController::class)
+    ->whereIn('event', ['eventCreated', 'teamRegistered', 'statisticsSubmitted'])
+    ->name('ruda.webhook');
+
 Route::get('/admin/teams', TeamsCrud::class)
     ->middleware('auth')
     ->name('admin.teams');

@@ -1,0 +1,23 @@
+# Хостинг смотрит в корень проекта, а Laravel должен открываться из public/.
+# Все запросы незаметно для посетителя перенаправляются в public/,
+# поэтому сайт открывается как https://uuquiz.ur, а не https://uuquiz.ur/public.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Ссылки со старым /public/ в адресе переадресуем на чистый адрес
+    RewriteCond %{THE_REQUEST} \s/public/([^\s?]*) [NC]
+    RewriteRule ^ /%1 [R=301,L,NE]
+
+    # Всё остальное отдаём из public/ (дальше работает public/.htaccess Laravel)
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Запасная защита: никогда не отдавать .env, .git и прочие служебные файлы
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(env|log|sqlite|lock|patch|xlsx)$|^(artisan|composer\.json|package\.json|phpunit\.xml)$">
+    Require all denied
+</FilesMatch>

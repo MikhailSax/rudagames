@@ -13,6 +13,7 @@ class Team extends Model
     use HasFactory;
 
     protected $fillable = [
+        'ruda_team_id',
         'phone',
         'current_name',
         'captain_name',

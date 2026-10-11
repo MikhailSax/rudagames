@@ -13,6 +13,8 @@ class Game extends Model
     use HasFactory;
 
     protected $fillable = [
+        'ruda_event_day_id',
+        'ruda_event_record_id',
         'product_id',
         'category_id',
         'name',
