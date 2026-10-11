@@ -134,13 +134,58 @@
                 @empty
                     <flux:table.row>
                         <flux:table.cell colspan="6">
-                            <flux:text variant="subtle">Для этой игры пока нет зарегистрированных команд.</flux:text>
+                            <flux:text variant="subtle">Для этой игры пока нет итогов.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
                 @endforelse
             </flux:table.rows>
         </flux:table>
     </flux:card>
+
+    @if ($this->registrations->isNotEmpty())
+        <flux:card class="space-y-4">
+            <div>
+                <flux:heading size="md">Заявки из Руды ({{ $this->registrations->count() }})</flux:heading>
+                <flux:text size="sm" variant="subtle">Команды, записавшиеся на игру. В участники они попадут после того, как ведущий внесёт итоги в Руде.</flux:text>
+            </div>
+
+            <flux:table>
+                <flux:table.columns>
+                    <flux:table.column>Команда</flux:table.column>
+                    <flux:table.column>Капитан</flux:table.column>
+                    <flux:table.column>Телефон</flux:table.column>
+                    <flux:table.column>Email</flux:table.column>
+                    <flux:table.column>В базе CRM</flux:table.column>
+                    <flux:table.column>Заявка</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @foreach ($this->registrations as $registration)
+                        <flux:table.row wire:key="registration-{{ $registration->id }}">
+                            <flux:table.cell>
+                                <div class="font-medium">{{ $registration->team_name ?? '—' }}</div>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $registration->captain_name ?? $registration->registrant_name ?? '—' }}</flux:table.cell>
+                            <flux:table.cell>{{ $registration->captain_phone ?? $registration->registrant_phone ?? '—' }}</flux:table.cell>
+                            <flux:table.cell>
+                                <flux:text size="sm" variant="subtle">{{ $registration->captain_email ?? $registration->registrant_email ?? '—' }}</flux:text>
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                @if ($registration->team)
+                                    <flux:badge size="sm" color="green">{{ $registration->team->current_name }}</flux:badge>
+                                @else
+                                    <flux:badge size="sm" color="zinc">новая</flux:badge>
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                <flux:text size="sm" variant="subtle">{{ $registration->created_at->format('d.m.Y H:i') }}</flux:text>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforeach
+                </flux:table.rows>
+            </flux:table>
+        </flux:card>
+    @endif
 
     <flux:modal name="edit-game" class="max-w-2xl">
         <div class="space-y-6">

@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Admin\GameShow;
 use App\Models\Game;
 use App\Models\GameCategory;
 use App\Models\GameParticipation;
@@ -8,6 +9,7 @@ use App\Models\RudaRegistration;
 use App\Models\RudaWebhookCall;
 use App\Models\Team;
 use App\Models\TeamNameHistory;
+use App\Models\User;
 
 const RUDA_SECRET = 'test-secret';
 const RUDA_DAY_1 = '11111111-1111-1111-1111-111111111111';
@@ -295,4 +297,20 @@ test('ruda:reprocess replays stored webhooks after a fix', function () {
 
     expect(GameParticipation::count())->toBe(1);
     expect(RudaWebhookCall::first()->result['unmatched'])->toBe([]);
+});
+
+test('game page lists Ruda registrations before the results arrive', function () {
+    $team = Team::create(['phone' => '79001112233', 'current_name' => 'Альфа']);
+
+    rudaPost('teamRegistered', rudaRegistration(501, 'Альфа', '89001112233'))->assertNoContent();
+    rudaPost('teamRegistered', rudaRegistration(502, 'Тест', '+7(000)000-00-00'))->assertNoContent();
+
+    $game = Game::where('ruda_event_day_id', RUDA_DAY_1)->first();
+
+    Livewire\Livewire::actingAs(User::factory()->create())
+        ->test(GameShow::class, ['game' => $game])
+        ->assertSee('Заявки из Руды (2)')
+        ->assertSee('Тест')
+        ->assertSee('+7(000)000-00-00')
+        ->assertSee($team->current_name);
 });

@@ -6,6 +6,7 @@ use App\Models\Game;
 use App\Models\GameCategory;
 use App\Models\GameParticipation;
 use App\Models\Product;
+use App\Models\RudaRegistration;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -18,14 +19,20 @@ class GameShow extends Component
 
     // --- Редактирование основной информации ---
     public ?int $product_id = null;
+
     public ?int $category_id = null;
+
     public string $name = '';
+
     public string $played_at = '';
+
     public string $venue = '';
+
     public string $cost = '';
 
     // --- Финансы (Модуль 2, вносятся вручную после игры) ---
     public string $actual_revenue = '';
+
     public string $actual_expenses = '';
 
     public function mount(): void
@@ -57,6 +64,17 @@ class GameShow extends Component
         return GameParticipation::with('team')
             ->where('game_id', $this->game->id)
             ->orderByDesc('revenue')
+            ->get();
+    }
+
+    // Заявки из вебхука Руды teamRegistered — до итогов игры это единственный
+    // список записавшихся команд (участия появляются только после statisticsSubmitted)
+    #[Computed]
+    public function registrations()
+    {
+        return RudaRegistration::with('team')
+            ->where('game_id', $this->game->id)
+            ->orderBy('created_at')
             ->get();
     }
 
