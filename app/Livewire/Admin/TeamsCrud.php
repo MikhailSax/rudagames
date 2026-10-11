@@ -54,7 +54,11 @@ class TeamsCrud extends Component
             })
             ->when($this->lifecycleFilter !== '', fn ($q) => $q->where('lifecycle_stage', $this->lifecycleFilter))
             ->when($this->activityFilter !== '', fn ($q) => $q->where('activity_status', $this->activityFilter))
+            // Новые команды из заявок Руды ещё без игр — показываем их сверху,
+            // иначе NULL в last_game_at уводит их на последнюю страницу
+            ->orderByRaw('last_game_at IS NULL DESC')
             ->orderByDesc('last_game_at')
+            ->orderByDesc('id')
             ->paginate(20);
     }
 

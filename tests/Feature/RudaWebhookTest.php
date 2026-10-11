@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Admin\GameShow;
+use App\Livewire\Admin\TeamsCrud;
 use App\Models\Game;
 use App\Models\GameCategory;
 use App\Models\GameParticipation;
@@ -330,4 +331,15 @@ test('game page lists Ruda registrations before the results arrive', function ()
         ->assertSee('Тест')
         ->assertSee('+7(000)000-00-00')
         ->assertSee($team->current_name);
+});
+
+test('teams list shows new teams without games first', function () {
+    $old = Team::create(['phone' => '79001112233', 'current_name' => 'Старая', 'last_game_at' => '2026-10-01 19:00:00']);
+    $new = Team::create(['phone' => '79001112244', 'current_name' => 'Из заявки Руды']);
+
+    $teams = Livewire\Livewire::actingAs(User::factory()->create())
+        ->test(TeamsCrud::class)
+        ->instance()->teams;
+
+    expect($teams->first()->id)->toBe($new->id);
 });
