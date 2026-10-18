@@ -153,7 +153,13 @@
             </flux:text>
 
             <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
-            <flux:input wire:model="actual_expenses" label="Расходы, ₽" type="number" step="0.01" />
+            @if ($financeItemized)
+                <flux:text size="sm" variant="subtle">
+                    Расходы считаются по статьям: {{ number_format((float) $actual_expenses, 0, ',', ' ') }} ₽. Изменить их можно на странице «Расходы».
+                </flux:text>
+            @else
+                <flux:input wire:model="actual_expenses" label="Расходы, ₽" type="number" step="0.01" />
+            @endif
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>

@@ -83,6 +83,23 @@
                 <flux:callout.text>Финансы по этой игре ещё не внесены.</flux:callout.text>
             </flux:callout>
         @endif
+
+        <div class="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+                <flux:text size="sm" variant="subtle">Расходы по статьям</flux:text>
+                <flux:button size="sm" variant="ghost" icon="plus" :href="route('admin.expenses', ['game' => $game->id])" wire:navigate>
+                    Добавить расход
+                </flux:button>
+            </div>
+            @forelse ($this->gameExpenses as $expense)
+                <div class="flex items-center justify-between gap-2" wire:key="game-expense-{{ $expense->id }}">
+                    <flux:text>{{ $expense->category->name }}{{ $expense->comment ? ' · '.$expense->comment : '' }}</flux:text>
+                    <flux:text>{{ number_format($expense->amount, 0, ',', ' ') }} ₽</flux:text>
+                </div>
+            @empty
+                <flux:text size="sm" variant="subtle">Пока нет. Если добавить, сумма расходов игры будет считаться по ним автоматически.</flux:text>
+            @endforelse
+        </div>
     </flux:card>
 
     <flux:card class="space-y-4">
@@ -231,7 +248,13 @@
             </flux:text>
 
             <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
-            <flux:input wire:model="actual_expenses" label="Расходы, ₽" type="number" step="0.01" />
+            @if ($this->gameExpenses->isNotEmpty())
+                <flux:text size="sm" variant="subtle">
+                    Расходы считаются по статьям: {{ number_format($this->gameExpenses->sum('amount'), 0, ',', ' ') }} ₽. Изменить их можно на странице «Расходы».
+                </flux:text>
+            @else
+                <flux:input wire:model="actual_expenses" label="Расходы, ₽" type="number" step="0.01" />
+            @endif
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>

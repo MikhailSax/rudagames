@@ -78,6 +78,13 @@ class GameShow extends Component
             ->get();
     }
 
+    // Расходы по статьям (страница «Расходы», группа «по играм»)
+    #[Computed]
+    public function gameExpenses()
+    {
+        return $this->game->expenses()->with('category')->orderBy('id')->get();
+    }
+
     #[Computed]
     public function avgCheck(): ?float
     {
@@ -148,15 +155,17 @@ class GameShow extends Component
 
     public function saveFinance(): void
     {
+        // Если расходы внесены по статьям, их сумма считается сама — вручную меняем только выручку
+        $itemized = $this->gameExpenses->isNotEmpty();
+
         $this->validate([
             'actual_revenue' => 'required|numeric|min:0',
-            'actual_expenses' => 'required|numeric|min:0',
+            'actual_expenses' => $itemized ? 'nullable' : 'required|numeric|min:0',
         ]);
 
-        $this->game->update([
-            'actual_revenue' => $this->actual_revenue,
-            'actual_expenses' => $this->actual_expenses,
-        ]);
+        $this->game->update($itemized
+            ? ['actual_revenue' => $this->actual_revenue]
+            : ['actual_revenue' => $this->actual_revenue, 'actual_expenses' => $this->actual_expenses]);
 
         $this->game->refresh();
         $this->modal('finance-form')->close();

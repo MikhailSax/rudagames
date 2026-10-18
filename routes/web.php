@@ -77,4 +77,10 @@ Route::get('/admin/reports', WeeklyReports::class)
     ->middleware(['auth'])
     ->name('admin.reports');
 
+use App\Livewire\Admin\ExpensesCrud;
+
+Route::get('/admin/expenses', ExpensesCrud::class)
+    ->middleware(['auth'])
+    ->name('admin.expenses');
+
 require __DIR__.'/settings.php';

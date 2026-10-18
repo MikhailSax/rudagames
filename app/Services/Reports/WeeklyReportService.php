@@ -3,6 +3,7 @@
 namespace App\Services\Reports;
 
 use App\Models\Communication;
+use App\Models\Expense;
 use App\Models\Game;
 use App\Models\GameParticipation;
 use App\Models\Team;
@@ -80,8 +81,20 @@ class WeeklyReportService
             ->whereBetween('played_at', [$start, $end])
             ->whereNotNull('actual_revenue')
             ->whereNotNull('actual_expenses')
-            ->selectRaw('COALESCE(SUM(actual_revenue - actual_expenses), 0) as profit')
-            ->value('profit');
+            ->selectRaw('COALESCE(SUM(actual_revenue - actual_expenses), 0) as total_profit')
+            // toBase(): через Eloquent value('profit') читал аксессор Game::profit (всегда null),
+            // и прибыль в отчётах получалась 0
+            ->toBase()
+            ->value('total_profit');
+
+        // Общие постоянные и переменные расходы недели (не привязанные к играм)
+        // уменьшают прибыль; расходы по играм уже сидят в actual_expenses игр.
+        $otherExpenses = Expense::query()
+            ->whereNull('game_id')
+            ->whereBetween('spent_on', [$start->toDateString(), $end->toDateString()])
+            ->sum('amount');
+
+        $profit = (float) $profit - (float) $otherExpenses;
 
         return [
             'revenue' => (float) $revenue,

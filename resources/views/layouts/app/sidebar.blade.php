@@ -37,6 +37,10 @@
                 {{ __('Игры') }}
             </flux:sidebar.item>
 
+            <flux:sidebar.item icon="banknotes" :href="route('admin.expenses')" :current="request()->routeIs('admin.expenses')" wire:navigate>
+                {{ __('Расходы') }}
+            </flux:sidebar.item>
+
             <flux:sidebar.item icon="user-group" :href="route('admin.players')" :current="request()->routeIs('admin.players')" wire:navigate>
                 {{ __('Игроки') }}
             </flux:sidebar.item>

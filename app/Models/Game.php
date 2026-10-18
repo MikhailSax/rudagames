@@ -54,6 +54,22 @@ class Game extends Model
             ->withTimestamps();
     }
 
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(Expense::class);
+    }
+
+    /**
+     * Если по игре внесены расходы по статьям, actual_expenses = их сумма.
+     * Последнюю статью удалили — сбрасываем в null, чтобы не осталась старая сумма.
+     */
+    public function syncExpensesFromItems(): void
+    {
+        $hasItems = $this->expenses()->exists();
+
+        $this->update(['actual_expenses' => $hasItems ? $this->expenses()->sum('amount') : null]);
+    }
+
     // Модуль 2: прибыль после ручного внесения выручки/расходов
     public function getProfitAttribute(): ?float
     {

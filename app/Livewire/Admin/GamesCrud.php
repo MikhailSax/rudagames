@@ -19,23 +19,34 @@ class GamesCrud extends Component
     protected $paginationTheme = 'tailwind';
 
     public string $search = '';
+
     public ?int $productFilter = null;
+
     public string $timeFilter = 'all'; // all | upcoming | past
 
     public ?int $editingId = null;
 
     // --- Поля создания/редактирования игры ---
     public ?int $product_id = null;
+
     public ?int $category_id = null;
+
     public string $name = '';
+
     public string $played_at = '';
+
     public string $venue = '';
+
     public string $cost = '';
 
     // --- Поля финансов (Модуль 2, вносятся вручную после игры) ---
     public ?int $financeGameId = null;
+
     public string $actual_revenue = '';
+
     public string $actual_expenses = '';
+
+    public bool $financeItemized = false;
 
     #[Computed]
     public function games()
@@ -157,6 +168,7 @@ class GamesCrud extends Component
         $this->financeGameId = $game->id;
         $this->actual_revenue = $game->actual_revenue !== null ? (string) $game->actual_revenue : '';
         $this->actual_expenses = $game->actual_expenses !== null ? (string) $game->actual_expenses : '';
+        $this->financeItemized = $game->expenses()->exists();
 
         $this->resetErrorBag();
         $this->modal('finance-form')->show();
@@ -166,13 +178,13 @@ class GamesCrud extends Component
     {
         $this->validate([
             'actual_revenue' => 'required|numeric|min:0',
-            'actual_expenses' => 'required|numeric|min:0',
+            'actual_expenses' => $this->financeItemized ? 'nullable' : 'required|numeric|min:0',
         ]);
 
-        Game::findOrFail($this->financeGameId)->update([
-            'actual_revenue' => $this->actual_revenue,
-            'actual_expenses' => $this->actual_expenses,
-        ]);
+        // Расходы, внесённые по статьям, считаются сами — их сумму здесь не перезаписываем
+        Game::findOrFail($this->financeGameId)->update($this->financeItemized
+            ? ['actual_revenue' => $this->actual_revenue]
+            : ['actual_revenue' => $this->actual_revenue, 'actual_expenses' => $this->actual_expenses]);
 
         $this->modal('finance-form')->close();
     }
