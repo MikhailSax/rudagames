@@ -4,6 +4,7 @@ namespace App\Livewire\Admin;
 
 use App\Models\Communication;
 use App\Models\GameParticipation;
+use App\Models\Income;
 use App\Models\MonthlyGoal;
 use App\Models\Team;
 use Carbon\CarbonInterface;
@@ -31,7 +32,12 @@ class AnalyticsDashboard extends Component
             ->when($start, fn ($q) => $q->where('games.played_at', '>=', $start))
             ->where('games.played_at', '<=', now());
 
-        $revenue = (clone $participations)->sum('game_participations.revenue');
+        // Выручка = команды на играх + разовые доходы (выездные игры и т.п.)
+        $revenue = (clone $participations)->sum('game_participations.revenue')
+            + Income::query()
+                ->when($start, fn ($q) => $q->where('received_on', '>=', $start->toDateString()))
+                ->where('received_on', '<=', now())
+                ->sum('amount');
         $gamesPlayed = (clone $participations)->distinct('game_participations.game_id')->count('game_participations.game_id');
         $avgTeamSize = (clone $participations)->avg('game_participations.players_count');
 
@@ -118,7 +124,8 @@ class AnalyticsDashboard extends Component
         return (float) GameParticipation::query()
             ->join('games', 'games.id', '=', 'game_participations.game_id')
             ->whereBetween('games.played_at', [now()->startOfMonth(), now()->endOfMonth()])
-            ->sum('game_participations.revenue');
+            ->sum('game_participations.revenue')
+            + Income::totalBetween(now()->startOfMonth(), now()->endOfMonth());
     }
 
     #[Computed]
@@ -175,14 +182,23 @@ class AnalyticsDashboard extends Component
     {
         // Группировка в PHP вместо SQL DATE_FORMAT — тот был завязан на MySQL
         // и падал на sqlite (дефолт в .env.example этого проекта).
-        return GameParticipation::query()
+        $byMonth = GameParticipation::query()
             ->join('games', 'games.id', '=', 'game_participations.game_id')
             ->where('games.played_at', '<=', now())
             ->get(['games.played_at', 'game_participations.revenue'])
             ->groupBy(fn ($row) => \Carbon\Carbon::parse($row->played_at)->format('Y-m'))
-            ->map(fn ($rows) => (float) $rows->sum('revenue'))
-            ->sortKeys()
-            ->toArray();
+            ->map(fn ($rows) => (float) $rows->sum('revenue'));
+
+        // Разовые доходы (выездные игры и т.п.) добавляем в свой месяц
+        Income::query()
+            ->where('received_on', '<=', now())
+            ->get(['received_on', 'amount'])
+            ->each(function (Income $income) use ($byMonth) {
+                $month = $income->received_on->format('Y-m');
+                $byMonth[$month] = ($byMonth[$month] ?? 0) + (float) $income->amount;
+            });
+
+        return $byMonth->sortKeys()->toArray();
     }
 
     #[Computed]

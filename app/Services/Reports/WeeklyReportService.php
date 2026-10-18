@@ -5,6 +5,7 @@ namespace App\Services\Reports;
 use App\Models\Communication;
 use App\Models\Expense;
 use App\Models\Game;
+use App\Models\Income;
 use App\Models\GameParticipation;
 use App\Models\Team;
 use App\Models\WeeklyReport;
@@ -72,7 +73,10 @@ class WeeklyReportService
             ->join('games', 'games.id', '=', 'game_participations.game_id')
             ->whereBetween('games.played_at', [$start, $end]);
 
-        $revenue = (clone $participations)->sum('game_participations.revenue');
+        $teamsRevenue = (float) (clone $participations)->sum('game_participations.revenue');
+        // Разовые доходы вне игр (выездные игры и т.п.) — в выручку и прибыль, но не в средний чек
+        $otherIncome = Income::totalBetween($start, $end);
+        $revenue = $teamsRevenue + $otherIncome;
         $teamsCount = (clone $participations)->count();
         $avgTeamSize = (clone $participations)->avg('game_participations.players_count');
 
@@ -91,15 +95,15 @@ class WeeklyReportService
         // уменьшают прибыль; расходы по играм уже сидят в actual_expenses игр.
         $otherExpenses = Expense::query()
             ->whereNull('game_id')
-            ->whereBetween('spent_on', [$start->toDateString(), $end->toDateString()])
+            ->whereBetween('spent_on', [$start->toDateString(), $end->toDateString().' 23:59:59'])
             ->sum('amount');
 
-        $profit = (float) $profit - (float) $otherExpenses;
+        $profit = (float) $profit - (float) $otherExpenses + $otherIncome;
 
         return [
             'revenue' => (float) $revenue,
             'profit' => (float) $profit,
-            'avg_check' => $teamsCount > 0 ? round($revenue / $teamsCount, 2) : null,
+            'avg_check' => $teamsCount > 0 ? round($teamsRevenue / $teamsCount, 2) : null,
             'avg_team_size' => $avgTeamSize !== null ? round((float) $avgTeamSize, 2) : null,
         ];
     }
