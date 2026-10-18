@@ -84,7 +84,13 @@ class BulkOutreach extends Component
                 continue;
             }
 
-            if ($this->channel === 'messenger' && ! $team->isTelegramLinked()) {
+            if ($this->channel === 'sms' && ! $team->phone) {
+                $skippedCount++;
+
+                continue;
+            }
+
+            if ($this->channel === 'messenger' && (! $team->isTelegramLinked() || ! $team->phone)) {
                 $skippedCount++;
 
                 continue;

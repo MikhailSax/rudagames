@@ -32,6 +32,11 @@ class RunMarketingEngine extends Command
             foreach ($teams as $team) {
                 $stats['проверено']++;
 
+                // Новичок из итогов Руды без телефона и email — связаться всё равно не выйдет
+                if (! $team->phone && ! $team->email) {
+                    continue;
+                }
+
                 $goal = $this->decideGoal($team, $now);
 
                 if ($goal === null) {

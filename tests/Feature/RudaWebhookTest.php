@@ -2,6 +2,7 @@
 
 use App\Livewire\Admin\GameShow;
 use App\Livewire\Admin\TeamsCrud;
+use App\Models\Communication;
 use App\Models\Game;
 use App\Models\GameCategory;
 use App\Models\GameParticipation;
@@ -11,6 +12,7 @@ use App\Models\RudaWebhookCall;
 use App\Models\Team;
 use App\Models\TeamNameHistory;
 use App\Models\User;
+use App\Services\Marketing\SendCommunicationService;
 
 const RUDA_SECRET = 'test-secret';
 const RUDA_DAY_1 = '11111111-1111-1111-1111-111111111111';
@@ -276,12 +278,13 @@ test('statisticsSubmitted falls back to an unambiguous team name when there is n
         ['teamId' => 139002, 'name' => 'No name', 'declaredPlayerCount' => 6, 'actualPlayerCount' => 6, 'points' => '52.8', 'revenue' => 3000],
     ]))->assertNoContent();
 
-    expect(GameParticipation::count())->toBe(2);
+    expect(GameParticipation::count())->toBe(3);
     expect($known->fresh()->ruda_team_id)->toBe(209026);
     expect($renamed->fresh()->ruda_team_id)->toBe(139603);
 
-    // Два «No name» — неоднозначно, не угадываем
-    expect(RudaWebhookCall::first()->result['unmatched'])->toBe(['No name']);
+    // Два «No name» — неоднозначно, не угадываем: заводим отдельную команду по ID Руды
+    expect(Team::where('ruda_team_id', 139002)->first()->phone)->toBeNull();
+    expect(RudaWebhookCall::first()->result['teams_created'])->toBe(1);
 });
 
 test('game time is taken from parsedDate in the event timezone, not from date', function () {
@@ -302,19 +305,55 @@ test('game time is taken from parsedDate in the event timezone, not from date', 
     expect(Game::where('ruda_event_day_id', RUDA_DAY_2)->first()->played_at->format('Y-m-d H:i'))->toBe('2026-10-13 19:00');
 });
 
-test('ruda:reprocess replays stored webhooks after a fix', function () {
+test('ruda:reprocess replays only the chosen event type', function () {
+    rudaPost('teamRegistered', rudaRegistration(501, 'Вафли', null))->assertNoContent();
     rudaPost('statisticsSubmitted', rudaStatistics([
-        ['teamId' => 5, 'name' => 'Вафли', 'declaredPlayerCount' => 5, 'actualPlayerCount' => 5, 'points' => null, 'revenue' => 2500],
+        ['teamId' => null, 'name' => 'Вафли', 'declaredPlayerCount' => 5, 'actualPlayerCount' => 5, 'points' => null, 'revenue' => 2500],
     ]))->assertNoContent();
     expect(GameParticipation::count())->toBe(0);
 
     // Команда появилась в CRM позже (например, после Excel-импорта)
     Team::create(['phone' => '79001112233', 'current_name' => 'Вафли']);
+    RudaRegistration::query()->delete();
 
-    $this->artisan('ruda:reprocess', ['ids' => [RudaWebhookCall::first()->id]])->assertSuccessful();
+    $this->artisan('ruda:reprocess', ['--event' => 'statisticsSubmitted'])->assertSuccessful();
 
     expect(GameParticipation::count())->toBe(1);
-    expect(RudaWebhookCall::first()->result['unmatched'])->toBe([]);
+    expect(RudaRegistration::count())->toBe(0); // заявки не переигрывались
+});
+
+test('first-time teams from statistics are created without a phone and get it from a later registration', function () {
+    rudaPost('statisticsSubmitted', rudaStatistics([
+        ['teamId' => 777, 'name' => 'Ёлки-Палки', 'declaredPlayerCount' => 4, 'actualPlayerCount' => 4, 'points' => '40', 'revenue' => 2000],
+    ]))->assertNoContent();
+
+    $team = Team::where('ruda_team_id', 777)->first();
+    expect($team->current_name)->toBe('Ёлки-Палки');
+    expect($team->phone)->toBeNull();
+    expect(GameParticipation::where('team_id', $team->id)->exists())->toBeTrue();
+
+    // На следующую игру команда записалась через Руду с телефоном — дописываем его, а не плодим дубль
+    rudaPost('teamRegistered', rudaRegistration(900, 'Ёлки-Палки', '+7 902 111-22-33', RUDA_DAY_2))->assertNoContent();
+
+    expect(Team::count())->toBe(1);
+    expect($team->fresh()->phone)->toBe('79021112233');
+});
+
+test('teams without a phone can be edited and are skipped by SMS sending', function () {
+    $team = Team::create(['current_name' => 'Новички', 'ruda_team_id' => 5]);
+
+    Livewire\Livewire::actingAs(User::factory()->create())
+        ->test(TeamsCrud::class)
+        ->call('edit', $team->id)
+        ->set('captain_name', 'Аня')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($team->fresh()->captain_name)->toBe('Аня');
+    expect($team->fresh()->phone)->toBeNull();
+
+    $draft = Communication::create(['team_id' => $team->id, 'goal' => 'вернуть', 'status' => Communication::STATUS_DRAFT]);
+    expect(app(SendCommunicationService::class)->send($draft, 'sms', 'Привет'))->toBeFalse();
 });
 
 test('game page lists Ruda registrations before the results arrive', function () {

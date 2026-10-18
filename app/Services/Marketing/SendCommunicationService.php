@@ -28,8 +28,9 @@ class SendCommunicationService
     {
         $team = $communication->team;
         $sent = match ($channel) {
-            'sms' => $this->sms->send($team->phone, $finalMessageText),
-            'messenger' => $this->messenger->send($team->phone, $finalMessageText),
+            // У команд-новичков из Руды телефона может не быть — это ошибка отправки, а не падение
+            'sms' => $team->phone ? $this->sms->send($team->phone, $finalMessageText) : false,
+            'messenger' => $team->phone ? $this->messenger->send($team->phone, $finalMessageText) : false,
             'email' => $this->sendEmail($team->email, $finalMessageText),
             default => throw new \InvalidArgumentException("Неизвестный канал: {$channel}"),
         };

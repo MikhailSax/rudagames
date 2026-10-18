@@ -75,10 +75,12 @@ class Team extends Model
         return $this->belongsTo(Product::class, 'favorite_product_id');
     }
 
-    // Нормализация телефона: храним только цифры (напр. 79021699021)
-    public function setPhoneAttribute(string $value): void
+    // Нормализация телефона: храним только цифры (напр. 79021699021).
+    // Телефона может не быть у команд-новичков из итогов Руды.
+    public function setPhoneAttribute(?string $value): void
     {
-        $this->attributes['phone'] = preg_replace('/\D/', '', $value);
+        $digits = preg_replace('/\D/', '', (string) $value);
+        $this->attributes['phone'] = $digits !== '' ? $digits : null;
     }
 
     /**

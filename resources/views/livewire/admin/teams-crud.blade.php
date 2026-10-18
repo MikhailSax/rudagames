@@ -52,7 +52,8 @@
                     </flux:table.cell>
                     <flux:table.cell>
                         <div class="flex items-center gap-2" x-data="{ copied: false }">
-                            <span>{{ $team->phone }}</span>
+                            <span>{{ $team->phone ?? '—' }}</span>
+                            @if ($team->phone)
                             <button
                                 type="button"
                                 title="Скопировать номер"
@@ -62,6 +63,7 @@
                                 <flux:icon x-show="!copied" name="clipboard" class="w-4 h-4" />
                                 <flux:icon x-show="copied" x-cloak name="check" class="w-4 h-4 text-green-600" />
                             </button>
+                            @endif
                             @if ($team->isTelegramLinked())
                                 <flux:icon name="paper-airplane" class="w-3.5 h-3.5 text-blue-500" title="Telegram подключён" />
                             @endif

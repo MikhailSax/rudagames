@@ -23,7 +23,8 @@ use Illuminate\Support\Facades\DB;
  * Руда не передаёт телефон в статистике, поэтому команда сопоставляется так:
  * teamId из Руды (teams.ruda_team_id) → заявка на эту же игру с тем же названием
  * команды → телефон из заявки (как в Excel-импорте, телефон — ключ команды) →
- * однозначное совпадение названия с командой, уже известной CRM.
+ * однозначное совпадение названия с командой, уже известной CRM → новая команда
+ * без телефона (новичок, заявка которого к нам не пришла).
  */
 class RudaWebhookService
 {
@@ -101,6 +102,12 @@ class RudaWebhookService
             // пока она не сыграет.
             $team = $phone ? $this->findTeamByPhone($phone) : null;
             $teamCreated = false;
+
+            // Новичок мог прийти раньше из итогов без телефона — дописываем ему телефон
+            if (! $team && $phone && ($teamName = $this->clean($data['teamName'] ?? null))) {
+                $team = $this->findTeamByName($teamName, withoutPhoneOnly: true);
+                $team?->update(['phone' => $phone]);
+            }
 
             if (! $team && $phone) {
                 $team = Team::create([
@@ -282,6 +289,13 @@ class RudaWebhookService
                 $team->update(['ruda_team_id' => $rudaTeamId]);
             }
 
+            // Команда-новичок без заявки: создаём без телефона, по ID Руды.
+            // Без ID Руды не создаём — иначе каждая такая игра плодила бы дубли.
+            if (! $team && $rudaTeamId) {
+                $team = Team::create(['current_name' => $teamName, 'ruda_team_id' => $rudaTeamId]);
+                $result['teams_created']++;
+            }
+
             return $team;
         }
 
@@ -321,18 +335,19 @@ class RudaWebhookService
      * вебхуков или напрямую у ведущего): ищем уже известную CRM команду по текущему
      * названию или по истории названий. Берём только однозначное совпадение.
      */
-    private function findTeamByName(string $teamName): ?Team
+    private function findTeamByName(string $teamName, bool $withoutPhoneOnly = false): ?Team
     {
         $needle = mb_strtolower($teamName);
+        $teams = fn () => Team::query()->when($withoutPhoneOnly, fn ($q) => $q->whereNull('phone'));
 
-        $ids = Team::where('current_name', $teamName)->pluck('id')
-            ->merge(TeamNameHistory::where('name', $teamName)->pluck('team_id'))
+        $ids = $teams()->where('current_name', $teamName)->pluck('id')
+            ->merge($withoutPhoneOnly ? [] : TeamNameHistory::where('name', $teamName)->pluck('team_id'))
             ->unique()
             ->values();
 
         // В SQLite сравнение регистрозависимое — добираем совпадения без учёта регистра
         if ($ids->isEmpty()) {
-            $ids = Team::query()
+            $ids = $teams()
                 ->get(['id', 'current_name'])
                 ->filter(fn (Team $t) => mb_strtolower($t->current_name) === $needle)
                 ->pluck('id');

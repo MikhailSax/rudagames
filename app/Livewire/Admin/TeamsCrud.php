@@ -137,7 +137,7 @@ class TeamsCrud extends Component
         $this->editingId = $team->id;
         $this->current_name = $team->current_name;
         $this->captain_name = $team->captain_name ?? '';
-        $this->phone = $team->phone;
+        $this->phone = $team->phone ?? '';
         $this->email = $team->email ?? '';
         $this->favorite_product_id = $team->favorite_product_id;
 
@@ -146,12 +146,12 @@ class TeamsCrud extends Component
 
     public function save(): void
     {
-        $normalizedPhone = preg_replace('/\D/', '', $this->phone);
+        $normalizedPhone = preg_replace('/\D/', '', $this->phone) ?: null;
 
         $this->validate([
             'current_name' => 'required|string|max:255',
             'captain_name' => 'nullable|string|max:255',
-            'phone' => 'required|string',
+            'phone' => 'nullable|string',
             'email' => 'nullable|email|max:255',
             'favorite_product_id' => 'nullable|integer|exists:products,id',
         ]);
@@ -160,7 +160,7 @@ class TeamsCrud extends Component
         if ($this->editingId) {
             $phoneExistsQuery->where('id', '!=', $this->editingId);
         }
-        if ($phoneExistsQuery->exists()) {
+        if ($normalizedPhone && $phoneExistsQuery->exists()) {
             $this->addError('phone', 'Команда с таким телефоном уже существует.');
 
             return;

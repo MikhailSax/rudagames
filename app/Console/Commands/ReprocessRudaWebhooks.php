@@ -10,7 +10,8 @@ class ReprocessRudaWebhooks extends Command
 {
     protected $signature = 'ruda:reprocess
                             {ids?* : ID записей из журнала ruda_webhook_calls}
-                            {--all : Все записи журнала по порядку}';
+                            {--all : Все записи журнала по порядку}
+                            {--event= : Только события этого типа, напр. statisticsSubmitted}';
 
     protected $description = 'Повторно обрабатывает сохранённые вебхуки Руды (после исправлений в сопоставлении)';
 
@@ -18,11 +19,13 @@ class ReprocessRudaWebhooks extends Command
     {
         $query = RudaWebhookCall::query()->orderBy('id');
 
-        if (! $this->option('all')) {
+        if ($event = $this->option('event')) {
+            $query->where('event', $event);
+        } elseif (! $this->option('all')) {
             $ids = $this->argument('ids');
 
             if (empty($ids)) {
-                $this->error('Укажите ID записей или --all');
+                $this->error('Укажите ID записей, --event или --all');
 
                 return self::FAILURE;
             }
