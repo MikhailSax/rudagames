@@ -86,6 +86,23 @@
 
         <div class="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2">
             <div class="flex items-center justify-between gap-2">
+                <flux:text size="sm" variant="subtle">Доходы сверх билетов</flux:text>
+                <flux:button size="sm" variant="ghost" icon="plus" :href="route('admin.incomes', ['game' => $game->id])" wire:navigate>
+                    Добавить доход
+                </flux:button>
+            </div>
+            @forelse ($this->gameIncomes as $income)
+                <div class="flex items-center justify-between gap-2" wire:key="game-income-{{ $income->id }}">
+                    <flux:text>{{ $income->category->name }}{{ $income->comment ? ' · '.$income->comment : '' }}</flux:text>
+                    <flux:text>{{ number_format($income->amount, 0, ',', ' ') }} ₽</flux:text>
+                </div>
+            @empty
+                <flux:text size="sm" variant="subtle">Нет. Билеты из Руды учитываются в выручке сами.</flux:text>
+            @endforelse
+        </div>
+
+        <div class="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
                 <flux:text size="sm" variant="subtle">Расходы по статьям</flux:text>
                 <flux:button size="sm" variant="ghost" icon="plus" :href="route('admin.expenses', ['game' => $game->id])" wire:navigate>
                     Добавить расход
@@ -247,7 +264,13 @@
                 Вносится после проведения игры — на основе этих данных считается прибыль.
             </flux:text>
 
-            <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
+            @if ($this->revenueItemized)
+                <flux:text size="sm" variant="subtle">
+                    Выручка считается сама: билеты из Руды и доходы по игре, {{ number_format((float) $game->actual_revenue, 0, ',', ' ') }} ₽. Доп. доходы вносятся на странице «Доходы».
+                </flux:text>
+            @else
+                <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
+            @endif
             @if ($this->gameExpenses->isNotEmpty())
                 <flux:text size="sm" variant="subtle">
                     Расходы считаются по статьям: {{ number_format($this->gameExpenses->sum('amount'), 0, ',', ' ') }} ₽. Изменить их можно на странице «Расходы».

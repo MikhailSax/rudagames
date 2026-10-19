@@ -3,7 +3,7 @@
         <div>
             <flux:heading size="xl">Расходы</flux:heading>
             <flux:text variant="subtle" class="mt-1">
-                Три группы расходов, внутри каждой — свои категории. Расходы по играм автоматически попадают в финансы игры.
+                Три категории расходов, внутри каждой свои подкатегории. Расходы по играм сдаются после каждой игры и сами попадают в её финансы.
             </flux:text>
         </div>
         <div class="flex items-end gap-2 shrink-0">
@@ -24,7 +24,7 @@
                         <flux:heading size="lg">{{ number_format($groupCategories->sum('month_total'), 0, ',', ' ') }} ₽</flux:heading>
                     </div>
                     <flux:button size="sm" variant="ghost" icon="plus" wire:click="createCategory('{{ $group }}')">
-                        Категория
+                        Подкатегория
                     </flux:button>
                 </div>
 
@@ -40,12 +40,12 @@
                                     variant="ghost"
                                     icon="trash"
                                     wire:click="deleteCategory({{ $category->id }})"
-                                    wire:confirm="Удалить категорию «{{ $category->name }}»?"
+                                    wire:confirm="Удалить подкатегорию «{{ $category->name }}»?"
                                 />
                             </div>
                         </div>
                     @empty
-                        <flux:text size="sm" variant="subtle" class="py-1.5">Категорий пока нет.</flux:text>
+                        <flux:text size="sm" variant="subtle" class="py-1.5">Подкатегорий пока нет.</flux:text>
                     @endforelse
                 </div>
             </flux:card>
@@ -64,7 +64,7 @@
                 Расходы за месяц: {{ number_format($this->monthTotal, 0, ',', ' ') }} ₽
             </flux:heading>
             <flux:select wire:model.live="groupFilter" class="sm:w-80">
-                <flux:select.option value="">Все группы</flux:select.option>
+                <flux:select.option value="">Все категории</flux:select.option>
                 @foreach ($this->groups as $group => $label)
                     <flux:select.option value="{{ $group }}">{{ $label }}</flux:select.option>
                 @endforeach
@@ -74,7 +74,7 @@
         <flux:table>
             <flux:table.columns>
                 <flux:table.column>Дата</flux:table.column>
-                <flux:table.column>Категория</flux:table.column>
+                <flux:table.column>Подкатегория</flux:table.column>
                 <flux:table.column>Игра</flux:table.column>
                 <flux:table.column>Комментарий</flux:table.column>
                 <flux:table.column>Сумма</flux:table.column>
@@ -127,11 +127,11 @@
     <flux:modal name="category-form" class="max-w-md">
         <div class="space-y-6">
             <div>
-                <flux:heading size="lg">{{ $editingCategoryId ? 'Изменить категорию' : 'Новая категория' }}</flux:heading>
+                <flux:heading size="lg">{{ $editingCategoryId ? 'Изменить подкатегорию' : 'Новая подкатегория' }}</flux:heading>
                 <flux:text size="sm" variant="subtle">{{ $this->groups[$categoryGroup] ?? '' }}</flux:text>
             </div>
 
-            <flux:input wire:model="categoryName" label="Название" placeholder="Например, Аренда зала" />
+            <flux:input wire:model="categoryName" label="Название" placeholder="Например, Зарплата ведущего" />
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>
@@ -146,7 +146,7 @@
         <div class="space-y-6">
             <flux:heading size="lg">{{ $editingExpenseId ? 'Изменить расход' : 'Новый расход' }}</flux:heading>
 
-            <flux:select wire:model.live="expenseGroup" label="Группа">
+            <flux:select wire:model.live="expenseGroup" label="Категория">
                 @foreach ($this->groups as $group => $label)
                     <flux:select.option value="{{ $group }}">{{ $label }}</flux:select.option>
                 @endforeach
@@ -154,11 +154,11 @@
 
             @if ($this->categoriesForExpenseGroup->isEmpty())
                 <flux:callout variant="warning" icon="exclamation-triangle">
-                    <flux:callout.text>В этой группе ещё нет категорий. Сначала добавьте категорию на странице расходов.</flux:callout.text>
+                    <flux:callout.text>В этой категории ещё нет подкатегорий. Сначала добавьте подкатегорию.</flux:callout.text>
                 </flux:callout>
             @else
-                <flux:select wire:model="expense_category_id" label="Категория" placeholder="Выберите категорию">
-                    <flux:select.option value="">Выберите категорию</flux:select.option>
+                <flux:select wire:model="expense_category_id" label="Подкатегория" placeholder="Выберите подкатегорию">
+                    <flux:select.option value="">Выберите подкатегорию</flux:select.option>
                     @foreach ($this->categoriesForExpenseGroup as $category)
                         <flux:select.option value="{{ $category->id }}">{{ $category->name }}</flux:select.option>
                     @endforeach

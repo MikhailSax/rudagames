@@ -169,7 +169,7 @@ class ExpensesCrud extends Component
             ->exists();
 
         if ($exists) {
-            $this->addError('categoryName', 'Такая категория в этой группе уже есть.');
+            $this->addError('categoryName', 'Такая подкатегория в этой категории уже есть.');
 
             return;
         }
@@ -181,7 +181,7 @@ class ExpensesCrud extends Component
                 ExpenseCategory::create(['group' => $this->categoryGroup, 'name' => $this->categoryName]);
             }
         } catch (QueryException) {
-            $this->addError('categoryName', 'Такая категория в этой группе уже есть.');
+            $this->addError('categoryName', 'Такая подкатегория в этой категории уже есть.');
 
             return;
         }
@@ -243,7 +243,7 @@ class ExpensesCrud extends Component
             'spent_on' => [$forGame ? 'nullable' : 'required', 'date'],
             'comment' => 'nullable|string|max:255',
         ], [], [
-            'expense_category_id' => 'категория',
+            'expense_category_id' => 'подкатегория',
             'game_id' => 'игра',
             'amount' => 'сумма',
             'spent_on' => 'дата',

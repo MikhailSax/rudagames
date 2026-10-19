@@ -72,6 +72,18 @@
                         @else
                             <flux:badge color="amber" size="sm">не внесены</flux:badge>
                         @endif
+
+                        {{-- Доходы и расходы по игре сдаются после каждой отыгранной игры --}}
+                        @if ($game->played_at->isPast())
+                            <div class="flex flex-wrap gap-1 mt-1">
+                                @if ($game->participations_count === 0)
+                                    <flux:badge color="amber" size="sm">итоги не пришли</flux:badge>
+                                @endif
+                                @if ($game->expenses_count === 0 && $game->actual_expenses === null)
+                                    <flux:badge color="amber" size="sm">расходы не сданы</flux:badge>
+                                @endif
+                            </div>
+                        @endif
                     </flux:table.cell>
                     <flux:table.cell>
                         <div class="flex gap-2 justify-end">
@@ -152,7 +164,13 @@
                 Вносится после проведения игры — на основе этих данных считается прибыль.
             </flux:text>
 
-            <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
+            @if ($revenueItemized)
+                <flux:text size="sm" variant="subtle">
+                    Выручка считается сама: билеты из Руды и доходы по игре, {{ number_format((float) $actual_revenue, 0, ',', ' ') }} ₽.
+                </flux:text>
+            @else
+                <flux:input wire:model="actual_revenue" label="Фактическая выручка, ₽" type="number" step="0.01" />
+            @endif
             @if ($financeItemized)
                 <flux:text size="sm" variant="subtle">
                     Расходы считаются по статьям: {{ number_format((float) $actual_expenses, 0, ',', ' ') }} ₽. Изменить их можно на странице «Расходы».

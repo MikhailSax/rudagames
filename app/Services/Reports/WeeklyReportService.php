@@ -98,7 +98,8 @@ class WeeklyReportService
             ->whereBetween('spent_on', [$start->toDateString(), $end->toDateString().' 23:59:59'])
             ->sum('amount');
 
-        $profit = (float) $profit - (float) $otherExpenses + $otherIncome;
+        // Доходы по играм уже сидят в actual_revenue игр — добавляем только доходы вне игр
+        $profit = (float) $profit - (float) $otherExpenses + Income::totalBetween($start, $end, unlinkedOnly: true);
 
         return [
             'revenue' => (float) $revenue,

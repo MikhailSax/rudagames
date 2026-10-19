@@ -1,36 +1,87 @@
 <?php
 
 use App\Livewire\Admin\AnalyticsDashboard;
+use App\Livewire\Admin\GamesCrud;
+use App\Livewire\Admin\GameShow;
 use App\Livewire\Admin\IncomesCrud;
+use App\Models\Game;
+use App\Models\GameCategory;
+use App\Models\GameParticipation;
 use App\Models\Income;
 use App\Models\IncomeCategory;
+use App\Models\Product;
+use App\Models\Team;
 use App\Models\User;
 use App\Services\Reports\WeeklyReportService;
 use Illuminate\Support\Carbon;
 use Livewire\Livewire;
 
-test('incomes page: categories and incomes can be created', function () {
-    Livewire::actingAs(User::factory()->create())
-        ->test(IncomesCrud::class, ['month' => '2026-10'])
-        ->call('createCategory')
-        ->set('categoryName', 'Выездная игра')
-        ->call('saveCategory')
-        ->assertHasNoErrors()
-        ->call('createIncome')
-        ->set('income_category_id', IncomeCategory::first()->id)
+function incomesGame(string $playedAt = '2026-10-13 19:00:00'): Game
+{
+    $product = Product::firstOrCreate(['name' => 'Мозгобойня']);
+    $category = GameCategory::firstOrCreate(['product_id' => $product->id, 'name' => 'Легкая']);
+
+    return Game::create([
+        'product_id' => $product->id, 'category_id' => $category->id,
+        'name' => 'Легкая #35', 'played_at' => $playedAt,
+    ]);
+}
+
+function incomesParticipation(Game $game, float $revenue): void
+{
+    $team = Team::create(['phone' => '7900'.random_int(1000000, 9999999), 'current_name' => 'Команда '.random_int(1, 99999)]);
+    GameParticipation::create([
+        'game_id' => $game->id, 'team_id' => $team->id,
+        'team_name_at_time' => $team->current_name, 'players_count' => 5, 'revenue' => $revenue,
+    ]);
+}
+
+test('incomes page: subcategories in both categories, an unlinked income', function () {
+    $component = Livewire::actingAs(User::factory()->create())
+        ->test(IncomesCrud::class, ['month' => '2026-10']);
+
+    foreach ([IncomeCategory::GROUP_GAME => 'Бар', IncomeCategory::GROUP_OTHER => 'Выездные мероприятия'] as $group => $name) {
+        $component->call('createCategory', $group)->set('categoryName', $name)->call('saveCategory')->assertHasNoErrors();
+    }
+
+    $component->call('createIncome', IncomeCategory::GROUP_OTHER)
+        ->set('income_category_id', IncomeCategory::where('name', 'Выездные мероприятия')->first()->id)
         ->set('amount', '25000')
         ->set('received_on', '2026-10-14')
-        ->set('comment', 'Корпоратив, 40 человек')
         ->call('saveIncome')
         ->assertHasNoErrors()
-        ->assertSee('Выездная игра')
-        ->assertSee('25 000');
+        ->assertSee('Выездные мероприятия')
+        ->assertSee('Билеты');
 
-    expect(Income::count())->toBe(1);
+    expect(Income::first()->game_id)->toBeNull();
 });
 
-test('an income category with incomes cannot be deleted', function () {
-    $category = IncomeCategory::create(['name' => 'Выездная игра']);
+test('game incomes require a game and are added to the game revenue together with tickets', function () {
+    $game = incomesGame();
+    incomesParticipation($game, 3000);
+    incomesParticipation($game, 2000);
+    $bar = IncomeCategory::create(['group' => IncomeCategory::GROUP_GAME, 'name' => 'Бар']);
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(IncomesCrud::class)
+        ->call('createIncome', IncomeCategory::GROUP_GAME)
+        ->set('income_category_id', $bar->id)
+        ->set('amount', '1500')
+        ->call('saveIncome')
+        ->assertHasErrors('game_id')
+        ->set('game_id', $game->id)
+        ->call('saveIncome')
+        ->assertHasNoErrors();
+
+    expect((float) $game->fresh()->actual_revenue)->toBe(6500.0); // 5000 билеты + 1500 бар
+    expect(Income::first()->received_on->toDateString())->toBe('2026-10-13');
+
+    Income::first()->delete();
+    expect((float) $game->fresh()->actual_revenue)->toBe(5000.0);
+});
+
+test('an income subcategory with incomes cannot be deleted', function () {
+    $category = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Гранты']);
     Income::create(['income_category_id' => $category->id, 'amount' => 1000, 'received_on' => '2026-10-02']);
 
     Livewire::actingAs(User::factory()->create())
@@ -41,23 +92,51 @@ test('an income category with incomes cannot be deleted', function () {
     expect(IncomeCategory::count())->toBe(1);
 });
 
-test('incomes are added to weekly revenue and profit but not to the average check', function () {
-    $category = IncomeCategory::create(['name' => 'Выездная игра']);
-    Income::create(['income_category_id' => $category->id, 'amount' => 25000, 'received_on' => '2026-10-18']); // последний день недели
-    Income::create(['income_category_id' => $category->id, 'amount' => 999, 'received_on' => '2026-10-25']); // другая неделя
+test('itemized game revenue is not overwritten from the finance form', function () {
+    $game = incomesGame();
+    incomesParticipation($game, 4000);
+    $game->syncRevenueFromItems();
 
-    $report = app(WeeklyReportService::class)->generateFor(
-        Carbon::parse('2026-10-12'),
-        Carbon::parse('2026-10-18'),
-    );
+    Livewire::actingAs(User::factory()->create())
+        ->test(GameShow::class, ['game' => $game->fresh()])
+        ->call('openFinance')
+        ->set('actual_revenue', '1')
+        ->set('actual_expenses', '500')
+        ->call('saveFinance')
+        ->assertHasNoErrors();
 
-    expect((float) $report->revenue)->toBe(25000.0);
-    expect((float) $report->profit)->toBe(25000.0);
-    expect($report->avg_check)->toBeNull();
+    $game->refresh();
+    expect((float) $game->actual_revenue)->toBe(4000.0);
+    expect((float) $game->actual_expenses)->toBe(500.0);
+});
+
+test('weekly report: game incomes counted once, unlinked incomes added to profit', function () {
+    $game = incomesGame('2026-10-13 19:00:00');
+    incomesParticipation($game, 5000);
+    $bar = IncomeCategory::create(['group' => IncomeCategory::GROUP_GAME, 'name' => 'Бар']);
+    $trip = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Выездные мероприятия']);
+    Income::create(['income_category_id' => $bar->id, 'game_id' => $game->id, 'amount' => 1000, 'received_on' => '2026-10-13']);
+    Income::create(['income_category_id' => $trip->id, 'amount' => 20000, 'received_on' => '2026-10-18']);
+    $game->update(['actual_expenses' => 2000]);
+
+    $report = app(WeeklyReportService::class)->generateFor(Carbon::parse('2026-10-12'), Carbon::parse('2026-10-18'));
+
+    expect((float) $report->revenue)->toBe(26000.0); // 5000 билеты + 1000 бар + 20000 выезд
+    expect((float) $report->profit)->toBe(24000.0); // (6000 − 2000) + 20000
+    expect((float) $report->avg_check)->toBe(5000.0); // только билеты
+});
+
+test('games list flags past games without results or expenses', function () {
+    incomesGame(now()->subDay()->toDateTimeString());
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(GamesCrud::class)
+        ->assertSee('итоги не пришли')
+        ->assertSee('расходы не сданы');
 });
 
 test('analytics month revenue includes incomes', function () {
-    $category = IncomeCategory::create(['name' => 'Выездная игра']);
+    $category = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Спонсорство']);
     Income::create(['income_category_id' => $category->id, 'amount' => 15000, 'received_on' => now()->startOfMonth()->toDateString()]);
 
     $component = Livewire::actingAs(User::factory()->create())->test(AnalyticsDashboard::class);

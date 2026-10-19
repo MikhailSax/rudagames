@@ -78,6 +78,20 @@ class GameShow extends Component
             ->get();
     }
 
+    // Доходы сверх билетов (страница «Доходы», категория «по играм»)
+    #[Computed]
+    public function gameIncomes()
+    {
+        return $this->game->incomes()->with('category')->orderBy('id')->get();
+    }
+
+    // Выручка считается сама, если есть билеты из Руды или доходы по игре
+    #[Computed]
+    public function revenueItemized(): bool
+    {
+        return $this->game->hasItemizedRevenue();
+    }
+
     // Расходы по статьям (страница «Расходы», группа «по играм»)
     #[Computed]
     public function gameExpenses()
@@ -155,17 +169,19 @@ class GameShow extends Component
 
     public function saveFinance(): void
     {
-        // Если расходы внесены по статьям, их сумма считается сама — вручную меняем только выручку
-        $itemized = $this->gameExpenses->isNotEmpty();
+        // Выручка и расходы, внесённые по статьям, считаются сами — вручную меняем только остальное
+        $expensesItemized = $this->gameExpenses->isNotEmpty();
+        $revenueItemized = $this->revenueItemized;
 
         $this->validate([
-            'actual_revenue' => 'required|numeric|min:0',
-            'actual_expenses' => $itemized ? 'nullable' : 'required|numeric|min:0',
+            'actual_revenue' => $revenueItemized ? 'nullable' : 'required|numeric|min:0',
+            'actual_expenses' => $expensesItemized ? 'nullable' : 'required|numeric|min:0',
         ]);
 
-        $this->game->update($itemized
-            ? ['actual_revenue' => $this->actual_revenue]
-            : ['actual_revenue' => $this->actual_revenue, 'actual_expenses' => $this->actual_expenses]);
+        $this->game->update(array_merge(
+            $revenueItemized ? [] : ['actual_revenue' => $this->actual_revenue],
+            $expensesItemized ? [] : ['actual_expenses' => $this->actual_expenses],
+        ));
 
         $this->game->refresh();
         $this->modal('finance-form')->close();

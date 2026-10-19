@@ -48,12 +48,14 @@ class GamesCrud extends Component
 
     public bool $financeItemized = false;
 
+    public bool $revenueItemized = false;
+
     #[Computed]
     public function games()
     {
         return Game::query()
             ->with(['product', 'category'])
-            ->withCount('participations')
+            ->withCount(['participations', 'expenses'])
             ->withAvg('participations', 'players_count')
             ->when($this->search !== '', fn ($q) => $q->where('name', 'like', "%{$this->search}%"))
             ->when($this->productFilter, fn ($q) => $q->where('product_id', $this->productFilter))
@@ -169,6 +171,7 @@ class GamesCrud extends Component
         $this->actual_revenue = $game->actual_revenue !== null ? (string) $game->actual_revenue : '';
         $this->actual_expenses = $game->actual_expenses !== null ? (string) $game->actual_expenses : '';
         $this->financeItemized = $game->expenses()->exists();
+        $this->revenueItemized = $game->hasItemizedRevenue();
 
         $this->resetErrorBag();
         $this->modal('finance-form')->show();
@@ -177,14 +180,15 @@ class GamesCrud extends Component
     public function saveFinance(): void
     {
         $this->validate([
-            'actual_revenue' => 'required|numeric|min:0',
+            'actual_revenue' => $this->revenueItemized ? 'nullable' : 'required|numeric|min:0',
             'actual_expenses' => $this->financeItemized ? 'nullable' : 'required|numeric|min:0',
         ]);
 
-        // Расходы, внесённые по статьям, считаются сами — их сумму здесь не перезаписываем
-        Game::findOrFail($this->financeGameId)->update($this->financeItemized
-            ? ['actual_revenue' => $this->actual_revenue]
-            : ['actual_revenue' => $this->actual_revenue, 'actual_expenses' => $this->actual_expenses]);
+        // Выручка и расходы, внесённые по статьям, считаются сами — их здесь не перезаписываем
+        Game::findOrFail($this->financeGameId)->update(array_merge(
+            $this->revenueItemized ? [] : ['actual_revenue' => $this->actual_revenue],
+            $this->financeItemized ? [] : ['actual_expenses' => $this->actual_expenses],
+        ));
 
         $this->modal('finance-form')->close();
     }

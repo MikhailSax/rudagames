@@ -188,6 +188,9 @@ class RudaWebhookService
                 $result['participations']++;
             }
 
+            // Выручка игры = билеты из итогов + доп. доходы по игре
+            $game->syncRevenueFromItems();
+
             return $result;
         });
     }

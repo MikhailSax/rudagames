@@ -2,19 +2,23 @@
 
 namespace App\Livewire\Admin;
 
+use App\Models\Game;
+use App\Models\GameParticipation;
 use App\Models\Income;
 use App\Models\IncomeCategory;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
- * Разовые доходы вне регулярных игр из Руды (выездные игры и т.п.).
- * Категории руководитель заводит сам; доходы попадают в выручку аналитики
- * и в недельные отчёты.
+ * Доходы в два уровня: категория (IncomeCategory::GROUPS) и подкатегории,
+ * которые руководитель заводит сам. Билеты по регулярным играм приходят из Руды
+ * автоматически; здесь вносится всё остальное. Доходы по игре складываются
+ * в её выручку (Game::syncRevenueFromItems).
  */
 #[Layout('layouts.app')]
 class IncomesCrud extends Component
@@ -22,15 +26,28 @@ class IncomesCrud extends Component
     #[Url]
     public string $month = '';
 
-    // --- Категория ---
+    #[Url(as: 'group')]
+    public string $groupFilter = '';
+
+    // Открыть форму дохода сразу для игры (ссылка со страницы игры)
+    #[Url(as: 'game')]
+    public ?int $openForGame = null;
+
+    // --- Подкатегория ---
     public ?int $editingCategoryId = null;
+
+    public string $categoryGroup = '';
 
     public string $categoryName = '';
 
     // --- Доход ---
     public ?int $editingIncomeId = null;
 
+    public string $incomeGroup = IncomeCategory::GROUP_OTHER;
+
     public ?int $income_category_id = null;
+
+    public ?int $game_id = null;
 
     public string $amount = '';
 
@@ -43,11 +60,23 @@ class IncomesCrud extends Component
         if (! preg_match('/^\d{4}-\d{2}$/', $this->month)) {
             $this->month = now()->format('Y-m');
         }
+
+        if ($this->openForGame && $game = Game::find($this->openForGame)) {
+            $this->month = $game->played_at->format('Y-m');
+            $this->createIncome(IncomeCategory::GROUP_GAME, $game->id);
+        }
     }
 
     private function monthStart(): Carbon
     {
         return Carbon::createFromFormat('Y-m-d', $this->month.'-01')->startOfDay();
+    }
+
+    /** @return array<string, string> */
+    #[Computed]
+    public function groups(): array
+    {
+        return IncomeCategory::GROUPS;
     }
 
     #[Computed]
@@ -58,7 +87,20 @@ class IncomesCrud extends Component
         return IncomeCategory::withCount('incomes')
             ->withSum(['incomes as month_total' => fn ($q) => $q->whereBetween('received_on', [$start, $start->copy()->endOfMonth()])], 'amount')
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->groupBy('group');
+    }
+
+    // Билеты за месяц: выручка команд из итогов Руды
+    #[Computed]
+    public function ticketsTotal(): float
+    {
+        $start = $this->monthStart();
+
+        return (float) GameParticipation::query()
+            ->join('games', 'games.id', '=', 'game_participations.game_id')
+            ->whereBetween('games.played_at', [$start, $start->copy()->endOfMonth()])
+            ->sum('game_participations.revenue');
     }
 
     #[Computed]
@@ -66,8 +108,9 @@ class IncomesCrud extends Component
     {
         $start = $this->monthStart();
 
-        return Income::with('category')
+        return Income::with(['category', 'game'])
             ->whereBetween('received_on', [$start, $start->copy()->endOfMonth()])
+            ->when($this->groupFilter !== '', fn ($q) => $q->whereHas('category', fn ($c) => $c->where('group', $this->groupFilter)))
             ->orderByDesc('received_on')
             ->orderByDesc('id')
             ->get();
@@ -76,14 +119,41 @@ class IncomesCrud extends Component
     #[Computed]
     public function monthTotal(): float
     {
-        return (float) $this->incomes->sum('amount');
+        return (float) $this->categories->flatten()->sum('month_total') + $this->ticketsTotal;
     }
 
-    // --- Категории ---
+    #[Computed]
+    public function categoriesForIncomeGroup()
+    {
+        return IncomeCategory::where('group', $this->incomeGroup)->orderBy('name')->get();
+    }
 
-    public function createCategory(): void
+    #[Computed]
+    public function gamesForSelect()
+    {
+        $start = $this->monthStart()->subMonth();
+
+        return Game::whereBetween('played_at', [$start, $start->copy()->addMonths(3)])
+            ->when($this->game_id, fn ($q) => $q->orWhere('id', $this->game_id))
+            ->orderByDesc('played_at')
+            ->get(['id', 'name', 'played_at', 'venue']);
+    }
+
+    public function updatedIncomeGroup(): void
+    {
+        $this->income_category_id = null;
+
+        if ($this->incomeGroup !== IncomeCategory::GROUP_GAME) {
+            $this->game_id = null;
+        }
+    }
+
+    // --- Подкатегории ---
+
+    public function createCategory(string $group): void
     {
         $this->editingCategoryId = null;
+        $this->categoryGroup = $group;
         $this->categoryName = '';
         $this->resetErrorBag();
         $this->modal('income-category-form')->show();
@@ -93,6 +163,7 @@ class IncomesCrud extends Component
     {
         $category = IncomeCategory::findOrFail($id);
         $this->editingCategoryId = $category->id;
+        $this->categoryGroup = $category->group;
         $this->categoryName = $category->name;
         $this->resetErrorBag();
         $this->modal('income-category-form')->show();
@@ -101,15 +172,17 @@ class IncomesCrud extends Component
     public function saveCategory(): void
     {
         $this->validate([
+            'categoryGroup' => ['required', Rule::in(array_keys(IncomeCategory::GROUPS))],
             'categoryName' => 'required|string|max:255',
         ], [], ['categoryName' => 'название']);
 
-        $exists = IncomeCategory::where('name', $this->categoryName)
+        $exists = IncomeCategory::where('group', $this->categoryGroup)
+            ->where('name', $this->categoryName)
             ->when($this->editingCategoryId, fn ($q) => $q->where('id', '!=', $this->editingCategoryId))
             ->exists();
 
         if ($exists) {
-            $this->addError('categoryName', 'Такая категория уже есть.');
+            $this->addError('categoryName', 'Такая подкатегория в этой категории уже есть.');
 
             return;
         }
@@ -118,10 +191,10 @@ class IncomesCrud extends Component
             if ($this->editingCategoryId) {
                 IncomeCategory::findOrFail($this->editingCategoryId)->update(['name' => $this->categoryName]);
             } else {
-                IncomeCategory::create(['name' => $this->categoryName]);
+                IncomeCategory::create(['group' => $this->categoryGroup, 'name' => $this->categoryName]);
             }
         } catch (QueryException) {
-            $this->addError('categoryName', 'Такая категория уже есть.');
+            $this->addError('categoryName', 'Такая подкатегория в этой категории уже есть.');
 
             return;
         }
@@ -144,10 +217,12 @@ class IncomesCrud extends Component
 
     // --- Доходы ---
 
-    public function createIncome(): void
+    public function createIncome(?string $group = null, ?int $gameId = null): void
     {
         $this->editingIncomeId = null;
+        $this->incomeGroup = $group ?? ($this->groupFilter ?: IncomeCategory::GROUP_OTHER);
         $this->income_category_id = null;
+        $this->game_id = $gameId;
         $this->amount = '';
         $this->received_on = now()->format('Y-m') === $this->month ? now()->format('Y-m-d') : $this->month.'-01';
         $this->comment = '';
@@ -157,9 +232,11 @@ class IncomesCrud extends Component
 
     public function editIncome(int $id): void
     {
-        $income = Income::findOrFail($id);
+        $income = Income::with('category')->findOrFail($id);
         $this->editingIncomeId = $income->id;
+        $this->incomeGroup = $income->category->group;
         $this->income_category_id = $income->income_category_id;
+        $this->game_id = $income->game_id;
         $this->amount = (string) $income->amount;
         $this->received_on = $income->received_on->format('Y-m-d');
         $this->comment = $income->comment ?? '';
@@ -169,21 +246,32 @@ class IncomesCrud extends Component
 
     public function saveIncome(): void
     {
+        $forGame = $this->incomeGroup === IncomeCategory::GROUP_GAME;
+
         $this->validate([
-            'income_category_id' => 'required|integer|exists:income_categories,id',
+            'incomeGroup' => ['required', Rule::in(array_keys(IncomeCategory::GROUPS))],
+            'income_category_id' => ['required', Rule::exists('income_categories', 'id')->where('group', $this->incomeGroup)],
+            'game_id' => [$forGame ? 'required' : 'nullable', 'integer', 'exists:games,id'],
             'amount' => 'required|numeric|min:0.01',
-            'received_on' => 'required|date',
+            'received_on' => [$forGame ? 'nullable' : 'required', 'date'],
             'comment' => 'nullable|string|max:255',
         ], [], [
-            'income_category_id' => 'категория',
+            'income_category_id' => 'подкатегория',
+            'game_id' => 'игра',
             'amount' => 'сумма',
             'received_on' => 'дата',
         ]);
 
+        // Доход по игре датируется днём игры — так он попадает в нужный месяц и неделю
+        $receivedOn = $forGame
+            ? Game::findOrFail($this->game_id)->played_at->toDateString()
+            : $this->received_on;
+
         $data = [
             'income_category_id' => $this->income_category_id,
+            'game_id' => $forGame ? $this->game_id : null,
             'amount' => $this->amount,
-            'received_on' => $this->received_on,
+            'received_on' => $receivedOn,
             'comment' => $this->comment ?: null,
         ];
 

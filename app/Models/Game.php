@@ -70,6 +70,32 @@ class Game extends Model
         $this->update(['actual_expenses' => $hasItems ? $this->expenses()->sum('amount') : null]);
     }
 
+    public function incomes(): HasMany
+    {
+        return $this->hasMany(Income::class);
+    }
+
+    /** Выручка игры складывается из билетов (участия из Руды) и доп. доходов по игре. */
+    public function hasItemizedRevenue(): bool
+    {
+        return $this->participations()->exists() || $this->incomes()->exists();
+    }
+
+    /**
+     * actual_revenue = билеты (сумма выручки команд) + доходы, привязанные к игре.
+     * Если ни того, ни другого нет — оставляем то, что внесено вручную.
+     */
+    public function syncRevenueFromItems(): void
+    {
+        if (! $this->hasItemizedRevenue()) {
+            return;
+        }
+
+        $this->update([
+            'actual_revenue' => (float) $this->participations()->sum('revenue') + (float) $this->incomes()->sum('amount'),
+        ]);
+    }
+
     // Модуль 2: прибыль после ручного внесения выручки/расходов
     public function getProfitAttribute(): ?float
     {
