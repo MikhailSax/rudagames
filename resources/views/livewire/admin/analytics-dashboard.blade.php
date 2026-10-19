@@ -1,8 +1,10 @@
-@once
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-@endonce
-
+{{-- Скрипт внутри корневого элемента: Livewire считает корнем компонента первый тег,
+     и если им был <script>, все кнопки и поля страницы оказывались вне компонента --}}
 <div class="flex flex-col gap-6">
+    @once
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    @endonce
+
     <div class="flex items-center justify-between">
         <flux:heading size="xl">Аналитика</flux:heading>
         <flux:text variant="subtle">{{ now()->format('d.m.Y') }}</flux:text>

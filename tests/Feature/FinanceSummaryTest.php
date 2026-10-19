@@ -85,3 +85,16 @@ test('analytics page shows income and expenses for the chosen dates', function (
     $component->set('financeFrom', '2025-01-01')->set('financeTo', '2025-01-31');
     expect($component->instance()->finance['income_total'])->toBe(0.0);
 });
+
+test('analytics period buttons work: the component root is the page, not the chart script', function () {
+    $component = Livewire::actingAs(User::factory()->create())->test(AnalyticsDashboard::class);
+
+    // Livewire вешает компонент на первый тег шаблона — раньше это был <script>, и кнопки не работали
+    expect(ltrim($component->html()))->toStartWith('<div');
+
+    $component->call('setFinancePeriod', 'prev_month')
+        ->assertSet('financeFrom', now()->subMonthNoOverflow()->startOfMonth()->toDateString())
+        ->call('setFinancePeriod', 'year')
+        ->assertSet('financeFrom', now()->startOfYear()->toDateString())
+        ->assertSet('financeTo', now()->toDateString());
+});
