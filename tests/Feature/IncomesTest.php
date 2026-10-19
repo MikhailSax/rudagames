@@ -61,6 +61,9 @@ test('incomes page: subcategories in both categories, an unlinked income', funct
         ->assertSee('Выездные мероприятия')
         ->assertSee('Билеты');
 
+    // Имя, телефон и место видны в таблице
+    $component->assertSee('Иван Петров')->assertSee('+7 (902) 111-22-33')->assertSee('Офис заказчика');
+
     $income = Income::first();
     expect($income->game_id)->toBeNull();
     expect($income->contact_name)->toBe('Иван Петров');
