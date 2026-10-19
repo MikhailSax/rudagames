@@ -15,6 +15,10 @@ class Income extends Model
     protected $fillable = [
         'income_category_id',
         'game_id',
+        'contact_name',
+        'contact_phone',
+        'venue',
+        'held_at',
         'amount',
         'received_on',
         'comment',
@@ -23,6 +27,7 @@ class Income extends Model
     protected $casts = [
         'amount' => 'decimal:2',
         'received_on' => 'date',
+        'held_at' => 'datetime',
     ];
 
     protected static function booted(): void

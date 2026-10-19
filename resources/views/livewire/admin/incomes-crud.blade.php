@@ -91,7 +91,8 @@
             <flux:table.columns>
                 <flux:table.column>Дата</flux:table.column>
                 <flux:table.column>Подкатегория</flux:table.column>
-                <flux:table.column>Игра</flux:table.column>
+                <flux:table.column>Игра / место</flux:table.column>
+                <flux:table.column>Контакт</flux:table.column>
                 <flux:table.column>Комментарий</flux:table.column>
                 <flux:table.column>Сумма</flux:table.column>
                 <flux:table.column></flux:table.column>
@@ -100,7 +101,7 @@
             <flux:table.rows>
                 @forelse ($this->incomes as $income)
                     <flux:table.row wire:key="income-{{ $income->id }}">
-                        <flux:table.cell>{{ $income->received_on->format('d.m.Y') }}</flux:table.cell>
+                        <flux:table.cell>{{ $income->held_at?->format('d.m.Y H:i') ?? $income->received_on->format('d.m.Y') }}</flux:table.cell>
                         <flux:table.cell>
                             <div class="font-medium">{{ $income->category->name }}</div>
                             <flux:text size="sm" variant="subtle">{{ $income->category->groupLabel() }}</flux:text>
@@ -108,6 +109,17 @@
                         <flux:table.cell>
                             @if ($income->game)
                                 <flux:link :href="route('admin.games.show', $income->game)" wire:navigate>{{ $income->game->name }}</flux:link>
+                            @endif
+                            @if ($income->venue)
+                                <flux:text size="sm" variant="subtle">{{ $income->venue }}</flux:text>
+                            @elseif (! $income->game)
+                                —
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell>
+                            @if ($income->contact_name || $income->contact_phone)
+                                <div>{{ $income->contact_name }}</div>
+                                <flux:text size="sm" variant="subtle">{{ $income->contact_phone }}</flux:text>
                             @else
                                 —
                             @endif
@@ -131,7 +143,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="6">
+                        <flux:table.cell colspan="7">
                             <flux:text variant="subtle">За этот месяц доходов, внесённых вручную, нет.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
@@ -192,7 +204,10 @@
                 </flux:select>
                 <flux:text size="sm" variant="subtle">Билеты вносить не нужно, они приходят из Руды. Здесь только доходы сверх билетов.</flux:text>
             @else
-                <flux:input wire:model="received_on" type="date" label="Дата" />
+                <flux:input wire:model="contact_name" label="Имя" placeholder="Кто заказал" />
+                <flux:input wire:model="contact_phone" label="Телефон" placeholder="+7..." />
+                <flux:input wire:model="venue" label="Место проведения" />
+                <flux:input wire:model="held_at" type="datetime-local" label="Дата и время проведения" description="Можно указать прошедшую дату" />
             @endif
 
             <flux:input wire:model="amount" type="number" step="0.01" label="Сумма, ₽" />

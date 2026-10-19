@@ -47,13 +47,47 @@ test('incomes page: subcategories in both categories, an unlinked income', funct
     $component->call('createIncome', IncomeCategory::GROUP_OTHER)
         ->set('income_category_id', IncomeCategory::where('name', 'Выездные мероприятия')->first()->id)
         ->set('amount', '25000')
-        ->set('received_on', '2026-10-14')
+        ->call('saveIncome')
+        ->assertHasErrors(['contact_name', 'contact_phone', 'venue'])
+        ->set('contact_name', 'Иван Петров')
+        ->set('contact_phone', 'abc')
+        ->set('venue', 'Офис заказчика')
+        ->set('held_at', '2026-10-14T18:30')
+        ->call('saveIncome')
+        ->assertHasErrors('contact_phone')
+        ->set('contact_phone', '+7 (902) 111-22-33')
         ->call('saveIncome')
         ->assertHasNoErrors()
         ->assertSee('Выездные мероприятия')
         ->assertSee('Билеты');
 
-    expect(Income::first()->game_id)->toBeNull();
+    $income = Income::first();
+    expect($income->game_id)->toBeNull();
+    expect($income->contact_name)->toBe('Иван Петров');
+    expect($income->contact_phone)->toBe('+7 (902) 111-22-33');
+    expect($income->venue)->toBe('Офис заказчика');
+    expect($income->held_at->format('Y-m-d H:i'))->toBe('2026-10-14 18:30');
+    expect($income->received_on->toDateString())->toBe('2026-10-14');
+});
+
+test('an unlinked income can be dated in the past and comment is optional', function () {
+    $category = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Спонсорство']);
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(IncomesCrud::class)
+        ->call('createIncome', IncomeCategory::GROUP_OTHER)
+        ->set('income_category_id', $category->id)
+        ->set('amount', '10000')
+        ->set('contact_name', 'Анна')
+        ->set('contact_phone', '89021112233')
+        ->set('venue', 'Бар «41»')
+        ->set('held_at', '2025-03-01T20:00')
+        ->call('saveIncome')
+        ->assertHasNoErrors();
+
+    $income = Income::first();
+    expect($income->held_at->format('Y-m-d H:i'))->toBe('2025-03-01 20:00');
+    expect($income->comment)->toBeNull();
 });
 
 test('game incomes require a game and are added to the game revenue together with tickets', function () {
@@ -74,6 +108,8 @@ test('game incomes require a game and are added to the game revenue together wit
         ->assertHasNoErrors();
 
     expect((float) $game->fresh()->actual_revenue)->toBe(6500.0); // 5000 билеты + 1500 бар
+    // По игре имя и телефон не нужны, время берётся из игры
+    expect(Income::first()->held_at->format('Y-m-d H:i'))->toBe('2026-10-13 19:00');
     expect(Income::first()->received_on->toDateString())->toBe('2026-10-13');
 
     Income::first()->delete();

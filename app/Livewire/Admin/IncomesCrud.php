@@ -51,7 +51,14 @@ class IncomesCrud extends Component
 
     public string $amount = '';
 
-    public string $received_on = '';
+    // Дата и время проведения (datetime-local). Можно ставить задним числом.
+    public string $held_at = '';
+
+    public string $contact_name = '';
+
+    public string $contact_phone = '';
+
+    public string $venue = '';
 
     public string $comment = '';
 
@@ -224,7 +231,10 @@ class IncomesCrud extends Component
         $this->income_category_id = null;
         $this->game_id = $gameId;
         $this->amount = '';
-        $this->received_on = now()->format('Y-m') === $this->month ? now()->format('Y-m-d') : $this->month.'-01';
+        $this->held_at = now()->format('Y-m') === $this->month ? now()->format('Y-m-d\TH:i') : $this->month.'-01T19:00';
+        $this->contact_name = '';
+        $this->contact_phone = '';
+        $this->venue = '';
         $this->comment = '';
         $this->resetErrorBag();
         $this->modal('income-form')->show();
@@ -238,7 +248,10 @@ class IncomesCrud extends Component
         $this->income_category_id = $income->income_category_id;
         $this->game_id = $income->game_id;
         $this->amount = (string) $income->amount;
-        $this->received_on = $income->received_on->format('Y-m-d');
+        $this->held_at = ($income->held_at ?? $income->received_on)->format('Y-m-d\TH:i');
+        $this->contact_name = $income->contact_name ?? '';
+        $this->contact_phone = $income->contact_phone ?? '';
+        $this->venue = $income->venue ?? '';
         $this->comment = $income->comment ?? '';
         $this->resetErrorBag();
         $this->modal('income-form')->show();
@@ -253,25 +266,39 @@ class IncomesCrud extends Component
             'income_category_id' => ['required', Rule::exists('income_categories', 'id')->where('group', $this->incomeGroup)],
             'game_id' => [$forGame ? 'required' : 'nullable', 'integer', 'exists:games,id'],
             'amount' => 'required|numeric|min:0.01',
-            'received_on' => [$forGame ? 'nullable' : 'required', 'date'],
+            // Вне игр: кто заказал, где и когда — обязательно; по игре это берётся из самой игры
+            'held_at' => [$forGame ? 'nullable' : 'required', 'date'],
+            'contact_name' => [$forGame ? 'nullable' : 'required', 'string', 'max:255'],
+            'contact_phone' => [$forGame ? 'nullable' : 'required', 'string', 'max:32', 'regex:/^[\d\s()+\-]*$/', function ($attribute, $value, $fail) {
+                if ($value !== '' && strlen(preg_replace('/\D/', '', $value)) < 10) {
+                    $fail('Телефон должен содержать не меньше 10 цифр.');
+                }
+            }],
+            'venue' => [$forGame ? 'nullable' : 'required', 'string', 'max:255'],
             'comment' => 'nullable|string|max:255',
         ], [], [
             'income_category_id' => 'подкатегория',
             'game_id' => 'игра',
             'amount' => 'сумма',
-            'received_on' => 'дата',
+            'held_at' => 'дата и время проведения',
+            'contact_name' => 'имя',
+            'contact_phone' => 'телефон',
+            'venue' => 'место проведения',
         ]);
 
-        // Доход по игре датируется днём игры — так он попадает в нужный месяц и неделю
-        $receivedOn = $forGame
-            ? Game::findOrFail($this->game_id)->played_at->toDateString()
-            : $this->received_on;
+        // Доход по игре датируется временем и местом игры — так он попадает в нужный месяц и неделю
+        $game = $forGame ? Game::findOrFail($this->game_id) : null;
+        $heldAt = $game ? $game->played_at : Carbon::parse($this->held_at);
 
         $data = [
             'income_category_id' => $this->income_category_id,
-            'game_id' => $forGame ? $this->game_id : null,
+            'game_id' => $game?->id,
+            'contact_name' => trim($this->contact_name) ?: null,
+            'contact_phone' => trim($this->contact_phone) ?: null,
+            'venue' => $game ? ($game->venue ?? (trim($this->venue) ?: null)) : trim($this->venue),
+            'held_at' => $heldAt,
             'amount' => $this->amount,
-            'received_on' => $receivedOn,
+            'received_on' => $heldAt->toDateString(),
             'comment' => $this->comment ?: null,
         ];
 
