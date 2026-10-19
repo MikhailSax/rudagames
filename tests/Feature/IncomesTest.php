@@ -183,3 +183,30 @@ test('analytics month revenue includes incomes', function () {
     expect($component->instance()->currentMonthRevenue)->toBe(15000.0);
     expect($component->instance()->revenueByMonth[now()->format('Y-m')])->toBe(15000.0);
 });
+
+test('payment checkboxes can be set in the form and toggled in the table', function () {
+    $category = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Выездные мероприятия']);
+
+    $component = Livewire::actingAs(User::factory()->create())
+        ->test(IncomesCrud::class)
+        ->call('createIncome', IncomeCategory::GROUP_OTHER)
+        ->set('income_category_id', $category->id)
+        ->set('amount', '30000')
+        ->set('contact_name', 'Анна')
+        ->set('contact_phone', '89021112233')
+        ->set('venue', 'Офис')
+        ->set('is_prepaid', true)
+        ->call('saveIncome')
+        ->assertHasNoErrors()
+        ->assertSee('Предоплата внесена');
+
+    $income = Income::first();
+    expect($income->is_prepaid)->toBeTrue();
+    expect($income->is_completed)->toBeFalse();
+
+    $component->call('toggleCompleted', $income->id)->call('togglePrepaid', $income->id);
+
+    $income->refresh();
+    expect($income->is_completed)->toBeTrue();
+    expect($income->is_prepaid)->toBeFalse();
+});

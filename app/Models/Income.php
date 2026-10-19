@@ -19,6 +19,8 @@ class Income extends Model
         'contact_phone',
         'venue',
         'held_at',
+        'is_prepaid',
+        'is_completed',
         'amount',
         'received_on',
         'comment',
@@ -28,6 +30,8 @@ class Income extends Model
         'amount' => 'decimal:2',
         'received_on' => 'date',
         'held_at' => 'datetime',
+        'is_prepaid' => 'boolean',
+        'is_completed' => 'boolean',
     ];
 
     protected static function booted(): void

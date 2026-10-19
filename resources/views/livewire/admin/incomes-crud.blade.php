@@ -94,6 +94,8 @@
                 <flux:table.column>Место</flux:table.column>
                 <flux:table.column>Имя</flux:table.column>
                 <flux:table.column>Телефон</flux:table.column>
+                <flux:table.column>Предоплата внесена</flux:table.column>
+                <flux:table.column>Проведено, оплачено</flux:table.column>
                 <flux:table.column>Комментарий</flux:table.column>
                 <flux:table.column>Сумма</flux:table.column>
                 <flux:table.column></flux:table.column>
@@ -114,6 +116,14 @@
                         <flux:table.cell>{{ $income->venue ?? '—' }}</flux:table.cell>
                         <flux:table.cell>{{ $income->contact_name ?? '—' }}</flux:table.cell>
                         <flux:table.cell class="whitespace-nowrap">{{ $income->contact_phone ?? '—' }}</flux:table.cell>
+                        <flux:table.cell class="text-center">
+                            <input type="checkbox" class="rounded cursor-pointer" title="Предоплата внесена"
+                                wire:click="togglePrepaid({{ $income->id }})" @checked($income->is_prepaid)>
+                        </flux:table.cell>
+                        <flux:table.cell class="text-center">
+                            <input type="checkbox" class="rounded cursor-pointer" title="Мероприятие проведено, оплачено"
+                                wire:click="toggleCompleted({{ $income->id }})" @checked($income->is_completed)>
+                        </flux:table.cell>
                         <flux:table.cell>
                             <flux:text size="sm" variant="subtle">{{ $income->comment ?? '' }}</flux:text>
                         </flux:table.cell>
@@ -133,7 +143,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="8">
+                        <flux:table.cell colspan="10">
                             <flux:text variant="subtle">За этот месяц доходов, внесённых вручную, нет.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
@@ -201,6 +211,17 @@
             @endif
 
             <flux:input wire:model="amount" type="number" step="0.01" label="Сумма, ₽" />
+
+            <div class="space-y-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" class="rounded" wire:model="is_prepaid">
+                    <flux:text>Предоплата внесена</flux:text>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" class="rounded" wire:model="is_completed">
+                    <flux:text>Мероприятие проведено, оплачено</flux:text>
+                </label>
+            </div>
             <flux:input wire:model="comment" label="Комментарий" placeholder="Необязательно" />
 
             <div class="flex justify-end gap-2">

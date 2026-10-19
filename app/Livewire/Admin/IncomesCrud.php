@@ -60,6 +60,10 @@ class IncomesCrud extends Component
 
     public string $venue = '';
 
+    public bool $is_prepaid = false;
+
+    public bool $is_completed = false;
+
     public string $comment = '';
 
     public function mount(): void
@@ -235,6 +239,8 @@ class IncomesCrud extends Component
         $this->contact_name = '';
         $this->contact_phone = '';
         $this->venue = '';
+        $this->is_prepaid = false;
+        $this->is_completed = false;
         $this->comment = '';
         $this->resetErrorBag();
         $this->modal('income-form')->show();
@@ -252,6 +258,8 @@ class IncomesCrud extends Component
         $this->contact_name = $income->contact_name ?? '';
         $this->contact_phone = $income->contact_phone ?? '';
         $this->venue = $income->venue ?? '';
+        $this->is_prepaid = $income->is_prepaid;
+        $this->is_completed = $income->is_completed;
         $this->comment = $income->comment ?? '';
         $this->resetErrorBag();
         $this->modal('income-form')->show();
@@ -297,6 +305,8 @@ class IncomesCrud extends Component
             'contact_phone' => trim($this->contact_phone) ?: null,
             'venue' => $game ? ($game->venue ?? (trim($this->venue) ?: null)) : trim($this->venue),
             'held_at' => $heldAt,
+            'is_prepaid' => $this->is_prepaid,
+            'is_completed' => $this->is_completed,
             'amount' => $this->amount,
             'received_on' => $heldAt->toDateString(),
             'comment' => $this->comment ?: null,
@@ -309,6 +319,19 @@ class IncomesCrud extends Component
         }
 
         $this->modal('income-form')->close();
+    }
+
+    // Чекбоксы прямо в таблице
+    public function togglePrepaid(int $id): void
+    {
+        $income = Income::findOrFail($id);
+        $income->update(['is_prepaid' => ! $income->is_prepaid]);
+    }
+
+    public function toggleCompleted(int $id): void
+    {
+        $income = Income::findOrFail($id);
+        $income->update(['is_completed' => ! $income->is_completed]);
     }
 
     public function deleteIncome(int $id): void
