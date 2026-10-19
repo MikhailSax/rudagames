@@ -262,6 +262,6 @@ class AnalyticsDashboard extends Component
     public function render()
     {
         return view('livewire.admin.analytics-dashboard')
-            ->layoutData(['title' => 'Аналитика']);
+            ->layoutData(['title' => 'Главная']);
     }
 }

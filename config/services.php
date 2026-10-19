@@ -47,6 +47,8 @@ return [
         'webhook_secret' => env('RUDA_WEBHOOK_SECRET'),
         // Продукт для новых игр, название которых ещё не встречалось в CRM
         'default_product' => env('RUDA_DEFAULT_PRODUCT', 'Мозгобойня'),
+        // Сколько процентов с доходов по регулярным играм отдаём Руде (выездные не облагаются)
+        'royalty_percent' => env('RUDA_ROYALTY_PERCENT', 15),
     ],
 
 ];

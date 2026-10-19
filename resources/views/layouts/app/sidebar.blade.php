@@ -10,8 +10,12 @@
                 <flux:sidebar.collapse class="lg:hidden" />
             </flux:sidebar.header>
 
-            <flux:sidebar.item icon="chart-bar" :href="route('admin.analytics')" :current="request()->routeIs('admin.analytics')" wire:navigate>
-                {{ __('Аналитика') }}
+            <flux:sidebar.item icon="home" :href="route('admin.analytics')" :current="request()->routeIs('admin.analytics')" wire:navigate>
+                {{ __('Главная') }}
+            </flux:sidebar.item>
+
+            <flux:sidebar.item icon="chart-bar" :href="route('admin.finance')" :current="request()->routeIs('admin.finance')" wire:navigate>
+                {{ __('Финансовая аналитика') }}
             </flux:sidebar.item>
 
             <flux:sidebar.item icon="document-chart-bar" :href="route('admin.reports')" :current="request()->routeIs('admin.reports')" wire:navigate>

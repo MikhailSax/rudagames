@@ -6,7 +6,7 @@
     @endonce
 
     <div class="flex items-center justify-between">
-        <flux:heading size="xl">Аналитика</flux:heading>
+        <flux:heading size="xl">Главная</flux:heading>
         <flux:text variant="subtle">{{ now()->format('d.m.Y') }}</flux:text>
     </div>
 
@@ -138,7 +138,7 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
                 <flux:text size="sm" variant="subtle">Доходы</flux:text>
                 <flux:heading size="xl">{{ number_format($finance['income_total'], 0, ',', ' ') }} ₽</flux:heading>
@@ -149,10 +149,21 @@
             </div>
             <div>
                 <flux:text size="sm" variant="subtle">Прибыль</flux:text>
-                <flux:heading size="xl" class="{{ $finance['profit'] >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
-                    {{ number_format($finance['profit'], 0, ',', ' ') }} ₽
+                <flux:heading size="xl">{{ number_format($finance['profit'], 0, ',', ' ') }} ₽</flux:heading>
+            </div>
+            <div>
+                <flux:text size="sm" variant="subtle">Руде {{ rtrim(rtrim(number_format($finance['royalty_percent'], 2, ',', ''), '0'), ',') }}%, без выездных</flux:text>
+                <flux:heading size="xl" class="text-amber-600 dark:text-amber-400">{{ number_format($finance['royalty'], 0, ',', ' ') }} ₽</flux:heading>
+            </div>
+            <div>
+                <flux:text size="sm" variant="subtle">Итого после отчисления Руде</flux:text>
+                <flux:heading size="xl" class="{{ $finance['profit_after_royalty'] >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                    {{ number_format($finance['profit_after_royalty'], 0, ',', ' ') }} ₽
                 </flux:heading>
             </div>
+        </div>
+        <div>
+            <flux:link :href="route('admin.finance')" wire:navigate class="text-sm">Подробно по каждой категории →</flux:link>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 border-t border-zinc-100 dark:border-zinc-800 pt-4">

@@ -18,6 +18,9 @@ use Carbon\CarbonInterface;
  * Расходы: по статьям всех трёх категорий + расходы игр, внесённые одной суммой
  * в «Финансах» игры (без статей) — чтобы старые игры не выпадали из расчёта.
  * Игры попадают в период по дате игры, остальное — по дате дохода/расхода.
+ *
+ * Роялти Руде (services.ruda.royalty_percent, 15%) считается с доходов по регулярным
+ * играм (билеты + доходы по играм); доходы вне игр (выездные и т.п.) не облагаются.
  */
 class FinanceSummaryService
 {
@@ -26,6 +29,10 @@ class FinanceSummaryService
      *     income_total: float,
      *     expense_total: float,
      *     profit: float,
+     *     royalty_percent: float,
+     *     royalty_base: float,
+     *     royalty: float,
+     *     profit_after_royalty: float,
      *     income_groups: array<string, array{label: string, total: float, rows: array<int, array{name: string, amount: float}>}>,
      *     expense_groups: array<string, array{label: string, total: float, rows: array<int, array{name: string, amount: float}>}>
      * }
@@ -105,10 +112,18 @@ class FinanceSummaryService
         $incomeTotal = (float) array_sum(array_column($incomeGroups, 'total'));
         $expenseTotal = (float) array_sum(array_column($expenseGroups, 'total'));
 
+        $royaltyPercent = (float) config('services.ruda.royalty_percent', 15);
+        $royaltyBase = $incomeGroups[IncomeCategory::GROUP_GAME]['total'];
+        $royalty = round($royaltyBase * $royaltyPercent / 100, 2);
+
         return [
             'income_total' => $incomeTotal,
             'expense_total' => $expenseTotal,
             'profit' => $incomeTotal - $expenseTotal,
+            'royalty_percent' => $royaltyPercent,
+            'royalty_base' => $royaltyBase,
+            'royalty' => $royalty,
+            'profit_after_royalty' => $incomeTotal - $expenseTotal - $royalty,
             'income_groups' => $incomeGroups,
             'expense_groups' => $expenseGroups,
         ];
@@ -124,5 +139,130 @@ class FinanceSummaryService
             fn (array $group) => [...$group, 'total' => (float) array_sum(array_column($group['rows'], 'amount'))],
             $groups,
         );
+    }
+
+    /**
+     * Детализация одной категории верхнего уровня за период: подкатегории с долями,
+     * помесячная разбивка и список операций.
+     *
+     * @param  'income'|'expense'  $kind
+     * @return array{
+     *     label: string,
+     *     total: float,
+     *     rows: array<int, array{name: string, amount: float, share: float}>,
+     *     months: array<string, array<string, float>>,
+     *     entries: array<int, array{date: CarbonInterface, sub: string, title: string, note: string, amount: float}>
+     * }
+     */
+    public function categoryDetail(string $kind, string $group, CarbonInterface $from, CarbonInterface $to): array
+    {
+        $from = $from->copy()->startOfDay();
+        $to = $to->copy()->endOfDay();
+        $dateRange = [$from->toDateString(), $to->toDateString().' 23:59:59'];
+        $entries = [];
+
+        if ($kind === 'income') {
+            $label = IncomeCategory::GROUPS[$group] ?? $group;
+
+            if ($group === IncomeCategory::GROUP_GAME) {
+                $games = Game::query()
+                    ->whereBetween('played_at', [$from, $to])
+                    ->withCount('participations')
+                    ->withSum('participations', 'revenue')
+                    ->whereHas('participations')
+                    ->get();
+
+                foreach ($games as $game) {
+                    $entries[] = [
+                        'date' => $game->played_at,
+                        'sub' => 'Билеты (из Руды)',
+                        'title' => $game->name,
+                        'note' => $game->participations_count.' команд',
+                        'amount' => (float) $game->participations_sum_revenue,
+                    ];
+                }
+            }
+
+            $incomes = Income::with(['category', 'game'])
+                ->whereHas('category', fn ($q) => $q->where('group', $group))
+                ->whereBetween('received_on', $dateRange)
+                ->get();
+
+            foreach ($incomes as $income) {
+                $entries[] = [
+                    'date' => $income->held_at ?? $income->received_on,
+                    'sub' => $income->category->name,
+                    'title' => $income->game->name ?? $income->venue ?? '',
+                    'note' => trim(($income->contact_name ?? '').' '.($income->comment ?? '')),
+                    'amount' => (float) $income->amount,
+                ];
+            }
+        } else {
+            $label = ExpenseCategory::GROUPS[$group] ?? $group;
+
+            $expenses = Expense::with(['category', 'game'])
+                ->whereHas('category', fn ($q) => $q->where('group', $group))
+                ->whereBetween('spent_on', $dateRange)
+                ->get();
+
+            foreach ($expenses as $expense) {
+                $entries[] = [
+                    'date' => $expense->spent_on,
+                    'sub' => $expense->category->name,
+                    'title' => $expense->game->name ?? '',
+                    'note' => $expense->comment ?? '',
+                    'amount' => (float) $expense->amount,
+                ];
+            }
+
+            if ($group === ExpenseCategory::GROUP_GAME) {
+                $games = Game::query()
+                    ->whereBetween('played_at', [$from, $to])
+                    ->whereNotNull('actual_expenses')
+                    ->whereDoesntHave('expenses')
+                    ->get();
+
+                foreach ($games as $game) {
+                    $entries[] = [
+                        'date' => $game->played_at,
+                        'sub' => 'Внесено в «Финансах» игры без статей',
+                        'title' => $game->name,
+                        'note' => '',
+                        'amount' => (float) $game->actual_expenses,
+                    ];
+                }
+            }
+        }
+
+        usort($entries, fn ($a, $b) => $b['date'] <=> $a['date']);
+
+        $total = (float) array_sum(array_column($entries, 'amount'));
+
+        $bySub = [];
+        $months = [];
+        foreach ($entries as $entry) {
+            $bySub[$entry['sub']] = ($bySub[$entry['sub']] ?? 0) + $entry['amount'];
+            $month = $entry['date']->format('Y-m');
+            $months[$month][$entry['sub']] = ($months[$month][$entry['sub']] ?? 0) + $entry['amount'];
+        }
+        arsort($bySub);
+        ksort($months);
+
+        $rows = [];
+        foreach ($bySub as $name => $amount) {
+            $rows[] = [
+                'name' => (string) $name,
+                'amount' => (float) $amount,
+                'share' => $total > 0 ? round($amount / $total * 100, 1) : 0.0,
+            ];
+        }
+
+        return [
+            'label' => $label,
+            'total' => $total,
+            'rows' => $rows,
+            'months' => $months,
+            'entries' => $entries,
+        ];
     }
 }

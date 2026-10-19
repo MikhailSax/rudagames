@@ -83,6 +83,12 @@ Route::get('/admin/expenses', ExpensesCrud::class)
     ->middleware(['auth'])
     ->name('admin.expenses');
 
+use App\Livewire\Admin\FinanceAnalytics;
+
+Route::get('/admin/finance', FinanceAnalytics::class)
+    ->middleware(['auth'])
+    ->name('admin.finance');
+
 use App\Livewire\Admin\IncomesCrud;
 
 Route::get('/admin/incomes', IncomesCrud::class)
