@@ -92,8 +92,9 @@
                 <flux:table.column>Дата</flux:table.column>
                 <flux:table.column>Подкатегория</flux:table.column>
                 <flux:table.column>Место</flux:table.column>
-                <flux:table.column>Имя</flux:table.column>
+                <flux:table.column>Контакт</flux:table.column>
                 <flux:table.column>Телефон</flux:table.column>
+                <flux:table.column>Соцсети</flux:table.column>
                 <flux:table.column>Предоплата внесена</flux:table.column>
                 <flux:table.column>Проведено, оплачено</flux:table.column>
                 <flux:table.column>Комментарий</flux:table.column>
@@ -116,6 +117,9 @@
                         <flux:table.cell>{{ $income->venue ?? '—' }}</flux:table.cell>
                         <flux:table.cell>{{ $income->contact_name ?? '—' }}</flux:table.cell>
                         <flux:table.cell class="whitespace-nowrap">{{ $income->contact_phone ?? '—' }}</flux:table.cell>
+                        <flux:table.cell class="max-w-48">
+                            <flux:text size="sm" class="break-words whitespace-pre-line">{{ $income->social ?? '—' }}</flux:text>
+                        </flux:table.cell>
                         <flux:table.cell class="text-center">
                             <input type="checkbox" class="rounded cursor-pointer" title="Предоплата внесена"
                                 wire:click="togglePrepaid({{ $income->id }})" @checked($income->is_prepaid)>
@@ -143,7 +147,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="10">
+                        <flux:table.cell colspan="11">
                             <flux:text variant="subtle">За этот месяц доходов, внесённых вручную, нет.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
@@ -204,8 +208,9 @@
                 </flux:select>
                 <flux:text size="sm" variant="subtle">Билеты вносить не нужно, они приходят из Руды. Здесь только доходы сверх билетов.</flux:text>
             @else
-                <flux:input wire:model="contact_name" label="Имя" placeholder="Кто заказал" />
-                <flux:input wire:model="contact_phone" label="Телефон" placeholder="+7..." />
+                <flux:input wire:model="contact_name" label="Контакт" placeholder="Кто заказал, необязательно" />
+                <flux:input wire:model="contact_phone" label="Телефон" placeholder="+7..., необязательно" />
+                <flux:textarea wire:model="social" label="Соцсети" placeholder="Ссылки или ники, необязательно" rows="2" />
                 <flux:input wire:model="venue" label="Место проведения" />
                 <flux:input wire:model="held_at" type="datetime-local" label="Дата и время проведения" description="Можно указать прошедшую дату" />
             @endif

@@ -48,7 +48,8 @@ test('incomes page: subcategories in both categories, an unlinked income', funct
         ->set('income_category_id', IncomeCategory::where('name', 'Выездные мероприятия')->first()->id)
         ->set('amount', '25000')
         ->call('saveIncome')
-        ->assertHasErrors(['contact_name', 'contact_phone', 'venue'])
+        ->assertHasErrors(['venue'])
+        ->assertHasNoErrors(['contact_name', 'contact_phone'])
         ->set('contact_name', 'Иван Петров')
         ->set('contact_phone', 'abc')
         ->set('venue', 'Офис заказчика')
@@ -56,13 +57,14 @@ test('incomes page: subcategories in both categories, an unlinked income', funct
         ->call('saveIncome')
         ->assertHasErrors('contact_phone')
         ->set('contact_phone', '+7 (902) 111-22-33')
+        ->set('social', 'vk.com/ivan_petrov')
         ->call('saveIncome')
         ->assertHasNoErrors()
         ->assertSee('Выездные мероприятия')
         ->assertSee('Билеты');
 
     // Имя, телефон и место видны в таблице
-    $component->assertSee('Иван Петров')->assertSee('+7 (902) 111-22-33')->assertSee('Офис заказчика');
+    $component->assertSee('Иван Петров')->assertSee('+7 (902) 111-22-33')->assertSee('Офис заказчика')->assertSee('vk.com/ivan_petrov');
 
     $income = Income::first();
     expect($income->game_id)->toBeNull();
@@ -209,4 +211,23 @@ test('payment checkboxes can be set in the form and toggled in the table', funct
     $income->refresh();
     expect($income->is_completed)->toBeTrue();
     expect($income->is_prepaid)->toBeFalse();
+});
+
+test('contact, phone and social are optional for incomes outside games', function () {
+    $category = IncomeCategory::create(['group' => IncomeCategory::GROUP_OTHER, 'name' => 'Гранты']);
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(IncomesCrud::class)
+        ->call('createIncome', IncomeCategory::GROUP_OTHER)
+        ->set('income_category_id', $category->id)
+        ->set('amount', '50000')
+        ->set('venue', 'Онлайн')
+        ->set('held_at', '2026-09-01T12:00')
+        ->call('saveIncome')
+        ->assertHasNoErrors();
+
+    $income = Income::first();
+    expect($income->contact_name)->toBeNull();
+    expect($income->contact_phone)->toBeNull();
+    expect($income->social)->toBeNull();
 });

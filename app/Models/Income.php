@@ -17,6 +17,7 @@ class Income extends Model
         'game_id',
         'contact_name',
         'contact_phone',
+        'social',
         'venue',
         'held_at',
         'is_prepaid',

@@ -58,6 +58,8 @@ class IncomesCrud extends Component
 
     public string $contact_phone = '';
 
+    public string $social = '';
+
     public string $venue = '';
 
     public bool $is_prepaid = false;
@@ -238,6 +240,7 @@ class IncomesCrud extends Component
         $this->held_at = now()->format('Y-m') === $this->month ? now()->format('Y-m-d\TH:i') : $this->month.'-01T19:00';
         $this->contact_name = '';
         $this->contact_phone = '';
+        $this->social = '';
         $this->venue = '';
         $this->is_prepaid = false;
         $this->is_completed = false;
@@ -257,6 +260,7 @@ class IncomesCrud extends Component
         $this->held_at = ($income->held_at ?? $income->received_on)->format('Y-m-d\TH:i');
         $this->contact_name = $income->contact_name ?? '';
         $this->contact_phone = $income->contact_phone ?? '';
+        $this->social = $income->social ?? '';
         $this->venue = $income->venue ?? '';
         $this->is_prepaid = $income->is_prepaid;
         $this->is_completed = $income->is_completed;
@@ -274,11 +278,13 @@ class IncomesCrud extends Component
             'income_category_id' => ['required', Rule::exists('income_categories', 'id')->where('group', $this->incomeGroup)],
             'game_id' => [$forGame ? 'required' : 'nullable', 'integer', 'exists:games,id'],
             'amount' => 'required|numeric|min:0.01',
-            // Вне игр: кто заказал, где и когда — обязательно; по игре это берётся из самой игры
+            // Вне игр: где и когда — обязательно (по игре берётся из самой игры).
+            // Контакт, телефон и соцсети необязательны.
             'held_at' => [$forGame ? 'nullable' : 'required', 'date'],
-            'contact_name' => [$forGame ? 'nullable' : 'required', 'string', 'max:255'],
-            'contact_phone' => [$forGame ? 'nullable' : 'required', 'string', 'max:32', 'regex:/^[\d\s()+\-]*$/', function ($attribute, $value, $fail) {
-                if ($value !== '' && strlen(preg_replace('/\D/', '', $value)) < 10) {
+            'contact_name' => ['nullable', 'string', 'max:255'],
+            'social' => ['nullable', 'string', 'max:2000'],
+            'contact_phone' => ['nullable', 'string', 'max:32', 'regex:/^[\d\s()+\-]*$/', function ($attribute, $value, $fail) {
+                if ($value !== null && $value !== '' && strlen(preg_replace('/\D/', '', $value)) < 10) {
                     $fail('Телефон должен содержать не меньше 10 цифр.');
                 }
             }],
@@ -291,6 +297,7 @@ class IncomesCrud extends Component
             'held_at' => 'дата и время проведения',
             'contact_name' => 'имя',
             'contact_phone' => 'телефон',
+            'social' => 'соцсети',
             'venue' => 'место проведения',
         ]);
 
@@ -303,6 +310,7 @@ class IncomesCrud extends Component
             'game_id' => $game?->id,
             'contact_name' => trim($this->contact_name) ?: null,
             'contact_phone' => trim($this->contact_phone) ?: null,
+            'social' => trim($this->social) ?: null,
             'venue' => $game ? ($game->venue ?? (trim($this->venue) ?: null)) : trim($this->venue),
             'held_at' => $heldAt,
             'is_prepaid' => $this->is_prepaid,
