@@ -7,7 +7,9 @@ use App\Models\GameParticipation;
 use App\Models\Income;
 use App\Models\MonthlyGoal;
 use App\Models\Team;
+use App\Services\Reports\FinanceSummaryService;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -16,6 +18,48 @@ use Livewire\Component;
 class AnalyticsDashboard extends Component
 {
     public string $goalInput = '';
+
+    // Доходы и расходы: произвольный интервал дат (по умолчанию — текущий месяц)
+    public string $financeFrom = '';
+
+    public string $financeTo = '';
+
+    public function mount(): void
+    {
+        $this->setFinancePeriod('month');
+    }
+
+    public function setFinancePeriod(string $preset): void
+    {
+        [$from, $to] = match ($preset) {
+            'prev_month' => [now()->subMonthNoOverflow()->startOfMonth(), now()->subMonthNoOverflow()->endOfMonth()],
+            'quarter' => [now()->startOfQuarter(), now()],
+            'year' => [now()->startOfYear(), now()],
+            default => [now()->startOfMonth(), now()->endOfMonth()],
+        };
+
+        $this->financeFrom = $from->toDateString();
+        $this->financeTo = $to->toDateString();
+    }
+
+    /** @return array<string, mixed> */
+    #[Computed]
+    public function finance(): array
+    {
+        $from = $this->parseDate($this->financeFrom) ?? now()->startOfMonth();
+        $to = $this->parseDate($this->financeTo) ?? now();
+
+        if ($from->gt($to)) {
+            [$from, $to] = [$to, $from];
+        }
+
+        return app(FinanceSummaryService::class)->summarize($from, $to);
+    }
+
+    private function parseDate(string $value): ?Carbon
+    {
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? Carbon::parse($value) : null;
+    }
 
     private function periodStart(): ?CarbonInterface
     {

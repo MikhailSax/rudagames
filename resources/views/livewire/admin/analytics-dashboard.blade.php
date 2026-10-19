@@ -119,6 +119,65 @@
         </flux:card>
     </div>
 
+    @php $finance = $this->finance; @endphp
+    <flux:card class="space-y-5">
+        <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+            <div>
+                <flux:heading size="md">Доходы и расходы</flux:heading>
+                <flux:text size="sm" variant="subtle">Билеты из Руды, доходы и расходы по категориям за выбранный период</flux:text>
+            </div>
+            <div class="flex flex-wrap items-end gap-2">
+                <flux:input wire:model.live="financeFrom" type="date" label="С" />
+                <flux:input wire:model.live="financeTo" type="date" label="По" />
+                <flux:button size="sm" variant="ghost" wire:click="setFinancePeriod('month')">Этот месяц</flux:button>
+                <flux:button size="sm" variant="ghost" wire:click="setFinancePeriod('prev_month')">Прошлый месяц</flux:button>
+                <flux:button size="sm" variant="ghost" wire:click="setFinancePeriod('quarter')">Квартал</flux:button>
+                <flux:button size="sm" variant="ghost" wire:click="setFinancePeriod('year')">Год</flux:button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+                <flux:text size="sm" variant="subtle">Доходы</flux:text>
+                <flux:heading size="xl">{{ number_format($finance['income_total'], 0, ',', ' ') }} ₽</flux:heading>
+            </div>
+            <div>
+                <flux:text size="sm" variant="subtle">Расходы</flux:text>
+                <flux:heading size="xl">{{ number_format($finance['expense_total'], 0, ',', ' ') }} ₽</flux:heading>
+            </div>
+            <div>
+                <flux:text size="sm" variant="subtle">Прибыль</flux:text>
+                <flux:heading size="xl" class="{{ $finance['profit'] >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                    {{ number_format($finance['profit'], 0, ',', ' ') }} ₽
+                </flux:heading>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+            @foreach (['Доходы' => $finance['income_groups'], 'Расходы' => $finance['expense_groups']] as $title => $groups)
+                <div class="space-y-4">
+                    <flux:heading size="sm">{{ $title }}</flux:heading>
+                    @foreach ($groups as $group)
+                        <div class="space-y-1">
+                            <div class="flex items-center justify-between gap-2">
+                                <flux:text class="font-medium">{{ $group['label'] }}</flux:text>
+                                <flux:text class="font-medium">{{ number_format($group['total'], 0, ',', ' ') }} ₽</flux:text>
+                            </div>
+                            @forelse ($group['rows'] as $row)
+                                <div class="flex items-center justify-between gap-2 pl-4">
+                                    <flux:text size="sm" variant="subtle">{{ $row['name'] }}</flux:text>
+                                    <flux:text size="sm" variant="subtle">{{ number_format($row['amount'], 0, ',', ' ') }} ₽</flux:text>
+                                </div>
+                            @empty
+                                <flux:text size="sm" variant="subtle" class="pl-4">нет за период</flux:text>
+                            @endforelse
+                        </div>
+                    @endforeach
+                </div>
+            @endforeach
+        </div>
+    </flux:card>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <flux:card>
             <flux:heading size="md" class="mb-4">Выручка по месяцам</flux:heading>
