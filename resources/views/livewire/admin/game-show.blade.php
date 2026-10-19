@@ -120,7 +120,12 @@
     </flux:card>
 
     <flux:card class="space-y-4">
-        <flux:heading size="md">Команды, участвовавшие в игре</flux:heading>
+        <div class="flex items-center justify-between gap-2">
+            <flux:heading size="md">Команды, участвовавшие в игре</flux:heading>
+            <flux:button size="sm" variant="ghost" icon="plus" wire:click="openAddTeam">
+                Добавить команду
+            </flux:button>
+        </div>
 
         <flux:table>
             <flux:table.columns>
@@ -130,6 +135,7 @@
                 <flux:table.column>Название на момент игры</flux:table.column>
                 <flux:table.column>Игроков</flux:table.column>
                 <flux:table.column>Выручка</flux:table.column>
+                <flux:table.column></flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -164,10 +170,19 @@
                         </flux:table.cell>
                         <flux:table.cell>{{ $participation->players_count }}</flux:table.cell>
                         <flux:table.cell>{{ number_format($participation->revenue, 0, ',', ' ') }} ₽</flux:table.cell>
+                        <flux:table.cell>
+                            <flux:button
+                                size="xs"
+                                variant="ghost"
+                                icon="trash"
+                                wire:click="removeParticipation({{ $participation->id }})"
+                                wire:confirm="Убрать команду «{{ $participation->team_name_at_time }}» из игры?"
+                            />
+                        </flux:table.cell>
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="6">
+                        <flux:table.cell colspan="7">
                             <flux:text variant="subtle">Для этой игры пока нет итогов.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
@@ -253,6 +268,55 @@
                     <flux:button variant="filled">Отмена</flux:button>
                 </flux:modal.close>
                 <flux:button wire:click="saveEdit" variant="primary">Сохранить</flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    <flux:modal name="add-team" class="max-w-lg">
+        <div class="space-y-5">
+            <flux:heading size="lg">Добавить команду в игру</flux:heading>
+
+            <flux:input wire:model.live.debounce.300ms="teamSearch" icon="magnifying-glass" placeholder="Название, капитан или телефон" />
+
+            <div class="max-h-64 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded-md divide-y divide-zinc-100 dark:divide-zinc-800">
+                @forelse ($this->teamOptions as $team)
+                    <button
+                        type="button"
+                        wire:key="team-option-{{ $team->id }}"
+                        wire:click="selectTeam({{ $team->id }})"
+                        class="w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 {{ $addTeamId === $team->id ? 'bg-blue-50 dark:bg-blue-500/10' : '' }}"
+                    >
+                        <div class="min-w-0">
+                            <div class="font-medium truncate">{{ $team->current_name }}</div>
+                            <flux:text size="sm" variant="subtle">{{ $team->captain_name ?? '—' }} · {{ $team->phone ?? 'без телефона' }}</flux:text>
+                        </div>
+                        @if ($addTeamId === $team->id)
+                            <flux:icon name="check" class="w-4 h-4 text-blue-600 shrink-0" />
+                        @endif
+                    </button>
+                @empty
+                    <div class="px-3 py-4">
+                        <flux:text size="sm" variant="subtle">Ничего не найдено. Новую команду можно создать в разделе «Команды».</flux:text>
+                    </div>
+                @endforelse
+            </div>
+            @error('addTeamId')
+                <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+            @enderror
+
+            <div class="grid grid-cols-2 gap-4">
+                <flux:input wire:model.live.debounce.300ms="addPlayersCount" type="number" min="0" label="Игроков" />
+                <flux:input wire:model="addRevenue" type="number" step="0.01" min="0" label="Выручка, ₽" />
+            </div>
+            @if ($game->cost !== null)
+                <flux:text size="sm" variant="subtle">Выручка подставится как игроки × {{ number_format($game->cost, 0, ',', ' ') }} ₽, её можно поправить.</flux:text>
+            @endif
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="filled">Отмена</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="addTeam" variant="primary">Добавить</flux:button>
             </div>
         </div>
     </flux:modal>

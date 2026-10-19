@@ -7,6 +7,7 @@ use App\Models\GameCategory;
 use App\Models\GameParticipation;
 use App\Models\Product;
 use App\Models\RudaRegistration;
+use App\Models\Team;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -34,6 +35,15 @@ class GameShow extends Component
     public string $actual_revenue = '';
 
     public string $actual_expenses = '';
+
+    // --- Добавление команды в игру ---
+    public string $teamSearch = '';
+
+    public ?int $addTeamId = null;
+
+    public string $addPlayersCount = '';
+
+    public string $addRevenue = '';
 
     public function mount(): void
     {
@@ -185,6 +195,104 @@ class GameShow extends Component
 
         $this->game->refresh();
         $this->modal('finance-form')->close();
+    }
+
+    // --- Состав игры: добавить / удалить команду ---
+
+    // Команды для выбора: поиск по названию, капитану или телефону; уже участвующие не показываем
+    #[Computed]
+    public function teamOptions()
+    {
+        $search = mb_strtolower(trim($this->teamSearch));
+        $digits = preg_replace('/\D/', '', $search);
+
+        // Фильтруем в PHP: LIKE в SQLite не умеет без учёта регистра для кириллицы
+        return Team::query()
+            ->whereNotIn('id', $this->participations->pluck('team_id'))
+            ->orderByDesc('last_game_at')
+            ->orderBy('current_name')
+            ->get(['id', 'current_name', 'captain_name', 'phone'])
+            ->when($search !== '', fn ($teams) => $teams->filter(fn (Team $team) => str_contains(mb_strtolower($team->current_name), $search)
+                || str_contains(mb_strtolower((string) $team->captain_name), $search)
+                || ($digits !== '' && str_contains((string) $team->phone, $digits))))
+            ->take(30)
+            ->values();
+    }
+
+    public function openAddTeam(): void
+    {
+        $this->teamSearch = '';
+        $this->addTeamId = null;
+        $this->addPlayersCount = '';
+        $this->addRevenue = '';
+        $this->resetErrorBag();
+        $this->modal('add-team')->show();
+    }
+
+    public function selectTeam(int $teamId): void
+    {
+        $this->addTeamId = $teamId;
+    }
+
+    // Выручка по умолчанию = игроки × цена билета игры
+    public function updatedAddPlayersCount(): void
+    {
+        if ($this->game->cost !== null && is_numeric($this->addPlayersCount)) {
+            $this->addRevenue = (string) ((int) $this->addPlayersCount * (float) $this->game->cost);
+        }
+    }
+
+    public function addTeam(): void
+    {
+        $this->validate([
+            'addTeamId' => 'required|integer|exists:teams,id',
+            'addPlayersCount' => 'required|integer|min:0|max:255',
+            'addRevenue' => 'required|numeric|min:0',
+        ], [], [
+            'addTeamId' => 'команда',
+            'addPlayersCount' => 'игроков',
+            'addRevenue' => 'выручка',
+        ]);
+
+        if (GameParticipation::where('game_id', $this->game->id)->where('team_id', $this->addTeamId)->exists()) {
+            $this->addError('addTeamId', 'Эта команда уже есть в игре.');
+
+            return;
+        }
+
+        $team = Team::findOrFail($this->addTeamId);
+
+        GameParticipation::create([
+            'game_id' => $this->game->id,
+            'team_id' => $team->id,
+            'team_name_at_time' => $team->current_name,
+            'players_count' => (int) $this->addPlayersCount,
+            'revenue' => $this->addRevenue,
+        ]);
+
+        $this->afterRosterChange();
+        $this->modal('add-team')->close();
+    }
+
+    public function removeParticipation(int $participationId): void
+    {
+        GameParticipation::where('game_id', $this->game->id)->whereKey($participationId)->delete();
+
+        $this->afterRosterChange();
+    }
+
+    // Выручка игры считается по билетам — пересчитываем после изменения состава
+    private function afterRosterChange(): void
+    {
+        if ($this->game->hasItemizedRevenue()) {
+            $this->game->syncRevenueFromItems();
+        } else {
+            // Убрали последнюю команду: билетов больше нет, а выручка была посчитана по ним
+            $this->game->update(['actual_revenue' => null]);
+        }
+
+        $this->game->refresh();
+        unset($this->participations, $this->teamOptions, $this->revenueItemized);
     }
 
     public function delete()
